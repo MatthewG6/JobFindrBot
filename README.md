@@ -69,7 +69,47 @@ Not planned for the early version:
 
 ## Current Status
 
-This repository has the initial Python project structure in place. The first version should stay small and focus on a working scanner, scoring model, storage layer, and tests.
+This repository has a small local MVP in place. It can accept job postings, score them with simple rules, detect duplicates, save them in TinyDB, and list saved jobs through FastAPI.
+
+## Current MVP
+
+The current app supports a local job ingestion workflow:
+
+1. A job comes in from an API route or the fake scanner.
+2. Pydantic validates it as a `JobPosting`.
+3. `app/ingestion.py` scores it, creates a `content_hash`, checks for duplicates, and saves new jobs.
+4. TinyDB stores saved jobs locally in the `data/` folder.
+5. `GET /jobs` returns the saved jobs.
+
+Current routes:
+
+```text
+GET  /
+GET  /health
+GET  /jobs
+POST /jobs
+POST /jobs/manual
+POST /scan/fake
+```
+
+`POST /jobs` and `POST /jobs/manual` both use the same ingestion pipeline. `POST /scan/fake` runs two hardcoded sample jobs through that same pipeline so the workflow can be tested without real scraping.
+
+Open the interactive API docs after starting the server:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Intentionally not built yet:
+
+- Real web scraping
+- Notifications
+- Scheduling
+- Playwright or browser automation
+- React frontend
+- Docker setup
+- AI scoring
+- Auto-apply behavior
 
 ## Project Structure
 
@@ -81,11 +121,14 @@ app/
   storage.py
   scoring.py
   dedupe.py
+  ingestion.py
   scanner.py
 data/
   .gitkeep
 tests/
+  test_main.py
   test_scoring.py
+  test_storage.py
 config.yaml
 requirements.txt
 README.md

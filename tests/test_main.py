@@ -48,7 +48,11 @@ def test_create_job_saves_job(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 201
-    assert response.json() == {"id": 1, "status": "saved"}
+    response_data = response.json()
+    assert response_data["created"] is True
+    assert response_data["job"]["id"] == 1
+    assert response_data["job"]["title"] == "Junior Software Engineer"
+    assert "content_hash" in response_data["job"]
 
 
 def test_list_jobs_returns_saved_jobs(tmp_path: Path) -> None:

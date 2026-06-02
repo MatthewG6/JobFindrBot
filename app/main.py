@@ -28,9 +28,8 @@ def list_jobs(storage: JobStorage = Depends(get_storage)) -> list[dict]:
 
 
 @app.post("/jobs", status_code=201)
-def create_job(job: JobPosting, storage: JobStorage = Depends(get_storage)) -> dict[str, int | str]:
-    saved_job = storage.save_job(job)
-    return {"id": saved_job["id"], "status": "saved"}
+def create_job(job: JobPosting, storage: JobStorage = Depends(get_storage)) -> dict:
+    return ingest_job(job, storage)
 
 
 @app.post("/jobs/manual", status_code=201)

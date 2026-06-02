@@ -5,6 +5,11 @@ from app.storage import JobStorage
 
 
 def ingest_job(job: JobPosting, storage: JobStorage) -> dict:
+    """Score, hash, dedupe, and save one job posting.
+
+    This is the main job ingestion pipeline. Routes and scanners should call
+    this function instead of repeating the same scoring and storage steps.
+    """
     scored_job = score_job(job)
     job_data = job.model_dump(mode="json")
     job_data["content_hash"] = job_content_hash(job)
