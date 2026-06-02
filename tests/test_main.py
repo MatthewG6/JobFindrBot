@@ -75,6 +75,74 @@ def test_list_jobs_returns_saved_jobs(tmp_path: Path) -> None:
     assert response.json()[0]["title"] == "Entry-Level Software Developer"
 
 
+def test_list_top_jobs_returns_highest_fit_score_first(tmp_path: Path) -> None:
+    client = make_test_client(tmp_path)
+    client.post(
+        "/jobs/manual",
+        json={
+            "title": "Senior Software Architect",
+            "company": "Example Company",
+            "location": "Remote",
+            "url": "https://example.com/senior-job",
+            "source": "test",
+            "description": "Requires 7+ years of experience.",
+        },
+    )
+    client.post(
+        "/jobs/manual",
+        json={
+            "title": "Junior React TypeScript Developer",
+            "company": "Better Example Company",
+            "location": "Minneapolis, MN",
+            "url": "https://example.com/junior-job",
+            "source": "test",
+            "description": "Build React and TypeScript features for a cloud product.",
+        },
+    )
+
+    response = client.get("/jobs/top")
+    jobs = response.json()
+
+    assert response.status_code == 200
+    assert isinstance(jobs, list)
+    assert jobs[0]["title"] == "Junior React TypeScript Developer"
+    assert jobs[0]["fit_score"] > jobs[1]["fit_score"]
+
+
+def test_list_top_jobs_handles_jobs_without_fit_score(tmp_path: Path) -> None:
+    storage = JobStorage(tmp_path / "jobs.json")
+    storage.save_job(
+        {
+            "title": "Unscored Job",
+            "company": "Example Company",
+            "location": "Minneapolis, MN",
+            "url": "https://example.com/unscored-job",
+            "source": "test",
+        }
+    )
+    client = make_test_client(tmp_path)
+    client.post(
+        "/jobs/manual",
+        json={
+            "title": "Junior React TypeScript Developer",
+            "company": "Better Example Company",
+            "location": "Minneapolis, MN",
+            "url": "https://example.com/junior-job",
+            "source": "test",
+            "description": "Build React and TypeScript features.",
+        },
+    )
+
+    response = client.get("/jobs/top")
+    jobs = response.json()
+
+    assert response.status_code == 200
+    assert isinstance(jobs, list)
+    assert jobs[0]["title"] == "Junior React TypeScript Developer"
+    assert jobs[1]["title"] == "Unscored Job"
+    assert "fit_score" not in jobs[1]
+
+
 def test_manual_job_post_creates_job(tmp_path: Path) -> None:
     client = make_test_client(tmp_path)
 

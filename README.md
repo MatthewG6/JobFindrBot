@@ -87,6 +87,7 @@ Current routes:
 GET  /
 GET  /health
 GET  /jobs
+GET  /jobs/top
 POST /jobs
 POST /jobs/manual
 POST /scan/fake

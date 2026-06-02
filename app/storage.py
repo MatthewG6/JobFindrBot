@@ -50,6 +50,13 @@ class JobStorage:
     def list_jobs(self) -> list[dict]:
         return [{"id": job.doc_id, **job} for job in self.jobs_table.all()]
 
+    def list_top_jobs(self) -> list[dict]:
+        return sorted(
+            self.list_jobs(),
+            key=lambda job: job.get("fit_score", 0),
+            reverse=True,
+        )
+
     def clear_jobs(self) -> None:
         self.jobs_table.truncate()
 
@@ -60,6 +67,10 @@ def save_job(job_data: dict) -> dict:
 
 def list_jobs() -> list[dict]:
     return JobStorage().list_jobs()
+
+
+def list_top_jobs() -> list[dict]:
+    return JobStorage().list_top_jobs()
 
 
 def clear_jobs() -> None:

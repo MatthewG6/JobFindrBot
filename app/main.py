@@ -27,6 +27,11 @@ def list_jobs(storage: JobStorage = Depends(get_storage)) -> list[dict]:
     return storage.list_jobs()
 
 
+@app.get("/jobs/top")
+def list_top_jobs(storage: JobStorage = Depends(get_storage)) -> list[dict]:
+    return storage.list_top_jobs()
+
+
 @app.post("/jobs", status_code=201)
 def create_job(job: JobPosting, storage: JobStorage = Depends(get_storage)) -> dict:
     return ingest_job(job, storage)
