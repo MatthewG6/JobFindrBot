@@ -11,6 +11,7 @@ class JobPosting(BaseModel):
     source: str
     description: str = ""
     posted_at: datetime | None = None
+    discovered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 

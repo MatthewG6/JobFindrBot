@@ -1,4 +1,35 @@
+from pathlib import Path
+
+from bs4 import BeautifulSoup
+
 from app.models import JobPosting
+
+
+def text_from_card(card: BeautifulSoup, class_name: str) -> str:
+    element = card.select_one(f".{class_name}")
+    if element is None:
+        return ""
+    return element.get_text(strip=True)
+
+
+def parse_jobs_from_html_file(file_path: str) -> list[JobPosting]:
+    html = Path(file_path).read_text(encoding="utf-8")
+    soup = BeautifulSoup(html, "html.parser")
+    jobs: list[JobPosting] = []
+
+    for card in soup.select(".job-card"):
+        jobs.append(
+            JobPosting(
+                title=text_from_card(card, "job-title"),
+                company=text_from_card(card, "job-company"),
+                location=text_from_card(card, "job-location"),
+                url=card.select_one(".job-link")["href"],
+                source="html_fixture",
+                description=text_from_card(card, "job-description"),
+            )
+        )
+
+    return jobs
 
 
 def scan_jobs() -> list[JobPosting]:
