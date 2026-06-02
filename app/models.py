@@ -18,3 +18,4 @@ class ScoredJob(BaseModel):
     job: JobPosting
     score: int
     reasons: list[str] = Field(default_factory=list)
+    red_flags: list[str] = Field(default_factory=list)

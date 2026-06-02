@@ -69,3 +69,71 @@ def test_list_jobs_returns_saved_jobs(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["title"] == "Entry-Level Software Developer"
+
+
+def test_manual_job_post_creates_job(tmp_path: Path) -> None:
+    client = make_test_client(tmp_path)
+
+    response = client.post(
+        "/jobs/manual",
+        json={
+            "title": "Junior Software Engineer",
+            "company": "Example Company",
+            "location": "Minneapolis, MN",
+            "url": "https://example.com/manual-job",
+            "source": "manual",
+            "description": "Build React and TypeScript features.",
+        },
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 201
+    assert response_data["created"] is True
+    assert response_data["job"]["title"] == "Junior Software Engineer"
+    assert response_data["score"] > 0
+
+
+def test_manual_job_post_does_not_create_duplicate(tmp_path: Path) -> None:
+    client = make_test_client(tmp_path)
+    job_data = {
+        "title": "Junior Software Engineer",
+        "company": "Example Company",
+        "location": "Minneapolis, MN",
+        "url": "https://example.com/manual-job",
+        "source": "manual",
+        "description": "Build Python APIs.",
+    }
+
+    first_response = client.post("/jobs/manual", json=job_data)
+    second_response = client.post("/jobs/manual", json=job_data)
+    jobs_response = client.get("/jobs")
+
+    assert first_response.json()["created"] is True
+    assert second_response.json()["created"] is False
+    assert len(jobs_response.json()) == 1
+
+
+def test_manual_job_saved_job_includes_score_and_hash_fields(tmp_path: Path) -> None:
+    client = make_test_client(tmp_path)
+
+    response = client.post(
+        "/jobs/manual",
+        json={
+            "title": "Senior Software Architect",
+            "company": "Example Company",
+            "location": "Remote",
+            "url": "https://example.com/senior-job",
+            "source": "manual",
+            "description": "Requires 7+ years of experience.",
+        },
+    )
+
+    saved_job = response.json()["job"]
+
+    assert "fit_score" in saved_job
+    assert "score_reasons" in saved_job
+    assert "red_flags" in saved_job
+    assert "content_hash" in saved_job
+    assert saved_job["fit_score"] < 0
+    assert saved_job["red_flags"]

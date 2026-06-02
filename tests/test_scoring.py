@@ -34,4 +34,4 @@ def test_penalizes_senior_roles() -> None:
     scored_job = score_job(job)
 
     assert scored_job.score < 0
-    assert "Penalized keyword: senior" in scored_job.reasons
+    assert "Penalized keyword: senior" in scored_job.red_flags

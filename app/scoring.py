@@ -39,6 +39,7 @@ def score_job(job: JobPosting) -> ScoredJob:
     text = f"{job.title} {job.location} {job.description}".lower()
     score = 0
     reasons: list[str] = []
+    red_flags: list[str] = []
 
     for keyword in GOOD_KEYWORDS:
         if keyword in text:
@@ -48,6 +49,6 @@ def score_job(job: JobPosting) -> ScoredJob:
     for keyword in BAD_KEYWORDS:
         if keyword in text:
             score -= 25
-            reasons.append(f"Penalized keyword: {keyword}")
+            red_flags.append(f"Penalized keyword: {keyword}")
 
-    return ScoredJob(job=job, score=score, reasons=reasons)
+    return ScoredJob(job=job, score=score, reasons=reasons, red_flags=red_flags)
