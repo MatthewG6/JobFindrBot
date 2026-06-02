@@ -150,6 +150,16 @@ python scripts/run_fake_scan.py
 
 The fake scan uses hardcoded sample jobs. It is only meant to prove the local ingestion, scoring, dedupe, and storage workflow.
 
+## Run HTML Fixture Scan From Terminal
+
+Run the local HTML fixture scanner without making network requests:
+
+```bash
+python scripts/run_html_fixture_scan.py
+```
+
+The script reads `tests/fixtures/sample_jobs.html`, parses the fake job cards, sends them through the shared ingestion pipeline, saves new jobs, and skips duplicates on repeated runs.
+
 ## What This Does Not Do Yet
 
 - No real scraping.
