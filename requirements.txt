@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pydantic
+tinydb
+pyyaml
+requests
+beautifulsoup4
+pytest

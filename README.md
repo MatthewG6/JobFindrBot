@@ -69,7 +69,48 @@ Not planned for the early version:
 
 ## Current Status
 
-This repository is at the planning and setup stage. The first version should stay small and focus on a working scanner, scoring model, storage layer, and tests.
+This repository has the initial Python project structure in place. The first version should stay small and focus on a working scanner, scoring model, storage layer, and tests.
+
+## Project Structure
+
+```text
+app/
+  __init__.py
+  main.py
+  models.py
+  storage.py
+  scoring.py
+  dedupe.py
+  scanner.py
+data/
+  .gitkeep
+tests/
+  test_scoring.py
+config.yaml
+requirements.txt
+README.md
+.gitignore
+```
+
+## Running Locally
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Run the FastAPI app:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Run tests:
+
+```bash
+pytest
+```
 
 ## Suggested First Milestones
 
