@@ -101,16 +101,63 @@ Open the interactive API docs after starting the server:
 http://127.0.0.1:8000/docs
 ```
 
-Intentionally not built yet:
+## Quick Demo
 
-- Real web scraping
-- Notifications
-- Scheduling
-- Playwright or browser automation
-- React frontend
-- Docker setup
-- AI scoring
-- Auto-apply behavior
+Activate the virtual environment:
+
+```bash
+source .venv/bin/activate
+```
+
+Run the tests:
+
+```bash
+pytest
+```
+
+Start the FastAPI server:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Open the API docs:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Try these routes in order:
+
+```text
+GET  /health
+POST /scan/fake
+GET  /jobs
+GET  /jobs/top
+```
+
+The demo flow is:
+
+1. Run the fake scan.
+2. View saved jobs with `GET /jobs`.
+3. View the best saved jobs first with `GET /jobs/top`.
+
+You can also run the fake scan from the terminal:
+
+```bash
+python scripts/run_fake_scan.py
+```
+
+The fake scan uses hardcoded sample jobs. It is only meant to prove the local ingestion, scoring, dedupe, and storage workflow.
+
+## What This Does Not Do Yet
+
+- No real scraping.
+- No notifications.
+- No scheduling.
+- No auto-apply behavior.
+- No browser automation.
+- No AI scoring.
 
 ## Project Structure
 
@@ -155,26 +202,6 @@ Run tests:
 ```bash
 pytest
 ```
-
-## Run Fake Scan From Terminal
-
-After activating the virtual environment, run the fake scanner without opening the FastAPI docs:
-
-```bash
-python scripts/run_fake_scan.py
-```
-
-The script uses the existing fake scanner and the shared ingestion pipeline. It prints how many jobs were scanned, how many were created, how many duplicates were skipped, each saved job title, and each job's fit score.
-
-## Suggested First Milestones
-
-1. Create a Pydantic model for a job posting.
-2. Add TinyDB storage for saving and listing jobs.
-3. Add a simple FastAPI app with health and jobs routes.
-4. Add basic scoring rules for target roles and disqualifying signals.
-5. Add pytest coverage for storage and scoring.
-6. Add simple scraping for one job source.
-7. Add local notifications after the core workflow works.
 
 ## Safety Boundaries
 
