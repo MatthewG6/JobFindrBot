@@ -155,6 +155,16 @@ Run tests:
 pytest
 ```
 
+## Run Fake Scan From Terminal
+
+After activating the virtual environment, run the fake scanner without opening the FastAPI docs:
+
+```bash
+python scripts/run_fake_scan.py
+```
+
+The script uses the existing fake scanner and the shared ingestion pipeline. It prints how many jobs were scanned, how many were created, how many duplicates were skipped, each saved job title, and each job's fit score.
+
 ## Suggested First Milestones
 
 1. Create a Pydantic model for a job posting.
