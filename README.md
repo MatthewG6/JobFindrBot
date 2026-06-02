@@ -160,6 +160,28 @@ python scripts/run_html_fixture_scan.py
 
 The script reads `tests/fixtures/sample_jobs.html`, parses the fake job cards, sends them through the shared ingestion pipeline, saves new jobs, and skips duplicates on repeated runs.
 
+## Scanner Development Stages
+
+### 1. Fake scanner
+
+The fake scanner uses hardcoded sample jobs. It proves the core pipeline:
+
+`job input -> ingestion -> scoring -> content_hash -> dedupe -> storage`
+
+It does not parse HTML or make network requests.
+
+### 2. HTML fixture scanner
+
+The HTML fixture scanner parses local sample HTML files from `tests/fixtures/` using BeautifulSoup. It does not make network requests.
+
+This stage proves the app can parse job-card-style HTML safely. Malformed or incomplete cards are skipped instead of crashing the parser.
+
+### 3. Future real scanner
+
+A future real scanner may use `requests` and BeautifulSoup against carefully chosen job sources. It should only be added after local parser tests are stable.
+
+Any real scanner must respect site terms, avoid aggressive scraping, never perform auto-apply behavior, and still send parsed jobs through the existing ingestion pipeline.
+
 ## What This Does Not Do Yet
 
 - No real scraping.
