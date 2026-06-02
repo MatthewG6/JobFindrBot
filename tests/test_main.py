@@ -137,3 +137,31 @@ def test_manual_job_saved_job_includes_score_and_hash_fields(tmp_path: Path) -> 
     assert "content_hash" in saved_job
     assert saved_job["fit_score"] < 0
     assert saved_job["red_flags"]
+
+
+def test_fake_scan_saves_sample_jobs(tmp_path: Path) -> None:
+    client = make_test_client(tmp_path)
+
+    response = client.post("/scan/fake")
+    jobs_response = client.get("/jobs")
+
+    response_data = response.json()
+
+    assert response.status_code == 201
+    assert response_data["created_count"] == 2
+    assert response_data["duplicate_count"] == 0
+    assert len(response_data["results"]) == 2
+    assert len(jobs_response.json()) == 2
+
+
+def test_fake_scan_does_not_duplicate_sample_jobs(tmp_path: Path) -> None:
+    client = make_test_client(tmp_path)
+
+    first_response = client.post("/scan/fake")
+    second_response = client.post("/scan/fake")
+    jobs_response = client.get("/jobs")
+
+    assert first_response.json()["created_count"] == 2
+    assert second_response.json()["created_count"] == 0
+    assert second_response.json()["duplicate_count"] == 2
+    assert len(jobs_response.json()) == 2

@@ -1,8 +1,8 @@
 from fastapi import Depends, FastAPI
 
-from app.dedupe import job_content_hash
+from app.ingestion import ingest_job
 from app.models import JobPosting
-from app.scoring import score_job
+from app.scanner import scan_jobs
 from app.storage import JobStorage
 
 app = FastAPI(title="Job Radar Assistant")
@@ -35,28 +35,17 @@ def create_job(job: JobPosting, storage: JobStorage = Depends(get_storage)) -> d
 
 @app.post("/jobs/manual", status_code=201)
 def create_manual_job(job: JobPosting, storage: JobStorage = Depends(get_storage)) -> dict:
-    scored_job = score_job(job)
-    job_data = job.model_dump(mode="json")
-    job_data["content_hash"] = job_content_hash(job)
-    job_data["fit_score"] = scored_job.score
-    job_data["score_reasons"] = scored_job.reasons
-    job_data["red_flags"] = scored_job.red_flags
+    return ingest_job(job, storage)
 
-    existing_job = storage.find_duplicate(job_data)
-    if existing_job is not None:
-        return {
-            "created": False,
-            "job": existing_job,
-            "score": existing_job.get("fit_score", scored_job.score),
-            "reasons": existing_job.get("score_reasons", scored_job.reasons),
-            "red_flags": existing_job.get("red_flags", scored_job.red_flags),
-        }
 
-    saved_job = storage.save_job(job_data)
+@app.post("/scan/fake", status_code=201)
+def run_fake_scan(storage: JobStorage = Depends(get_storage)) -> dict:
+    results = [ingest_job(job, storage) for job in scan_jobs()]
+    created_count = sum(1 for result in results if result["created"])
+    duplicate_count = len(results) - created_count
+
     return {
-        "created": True,
-        "job": saved_job,
-        "score": scored_job.score,
-        "reasons": scored_job.reasons,
-        "red_flags": scored_job.red_flags,
+        "created_count": created_count,
+        "duplicate_count": duplicate_count,
+        "results": results,
     }
