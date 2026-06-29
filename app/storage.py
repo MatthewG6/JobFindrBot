@@ -79,7 +79,12 @@ class JobStorage:
             for application in self.applications_table.all()
         ]
 
-    def create_application(self, job_id: int) -> dict:
+    def create_application(
+        self,
+        job_id: int,
+        initial_message: str | None = None,
+        current_step: str | None = None,
+    ) -> dict:
         if not self.jobs_table.contains(doc_id=job_id):
             raise ValueError(f"Job {job_id} does not exist")
 
@@ -88,14 +93,17 @@ class JobStorage:
         if existing is not None:
             return {"id": existing.doc_id, **existing}
 
-        message = "Application candidate created; waiting for approval to start"
+        message = (
+            initial_message
+            or "Application candidate created; waiting for approval to start"
+        )
         event = ApplicationEvent(
             status=ApplicationStatus.AWAITING_START_APPROVAL,
             message=message,
         )
         application = ApplicationRecord(
             job_id=job_id,
-            current_step=message,
+            current_step=current_step or message,
             events=[event],
         )
         document_id = self.applications_table.insert(
