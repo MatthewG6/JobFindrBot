@@ -3,7 +3,13 @@ from pathlib import Path
 from tinydb import Query, TinyDB
 
 from app.dedupe import job_content_hash
-from app.models import JobPosting
+from app.models import (
+    ApplicationEvent,
+    ApplicationRecord,
+    ApplicationStatus,
+    JobPosting,
+    utc_now,
+)
 
 
 DEFAULT_DB_PATH = Path("data/jobs.json")
@@ -14,6 +20,7 @@ class JobStorage:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db = TinyDB(db_path)
         self.jobs_table = self.db.table("jobs")
+        self.applications_table = self.db.table("applications")
 
     def find_duplicate(self, job_data: dict) -> dict | None:
         jobs = Query()
@@ -59,6 +66,72 @@ class JobStorage:
 
     def clear_jobs(self) -> None:
         self.jobs_table.truncate()
+
+    def get_application(self, application_id: int) -> dict | None:
+        application = self.applications_table.get(doc_id=application_id)
+        if application is None:
+            return None
+        return {"id": application.doc_id, **application}
+
+    def list_applications(self) -> list[dict]:
+        return [
+            {"id": application.doc_id, **application}
+            for application in self.applications_table.all()
+        ]
+
+    def create_application(self, job_id: int) -> dict:
+        if not self.jobs_table.contains(doc_id=job_id):
+            raise ValueError(f"Job {job_id} does not exist")
+
+        applications = Query()
+        existing = self.applications_table.get(applications.job_id == job_id)
+        if existing is not None:
+            return {"id": existing.doc_id, **existing}
+
+        message = "Application candidate created; waiting for approval to start"
+        event = ApplicationEvent(
+            status=ApplicationStatus.AWAITING_START_APPROVAL,
+            message=message,
+        )
+        application = ApplicationRecord(
+            job_id=job_id,
+            current_step=message,
+            events=[event],
+        )
+        document_id = self.applications_table.insert(
+            application.model_dump(mode="json")
+        )
+        return {"id": document_id, **application.model_dump(mode="json")}
+
+    def add_application_event(
+        self,
+        application_id: int,
+        message: str,
+        status: ApplicationStatus | str | None = None,
+        current_step: str | None = None,
+        provider: str | None = None,
+    ) -> dict:
+        application = self.get_application(application_id)
+        if application is None:
+            raise ValueError(f"Application {application_id} does not exist")
+
+        next_status = ApplicationStatus(status or application["status"])
+        event = ApplicationEvent(status=next_status, message=message)
+        events = [*application["events"], event.model_dump(mode="json")]
+        updates = {
+            "status": next_status.value,
+            "current_step": current_step or message,
+            "events": events,
+            "updated_at": utc_now().isoformat(),
+        }
+        if provider is not None:
+            updates["provider"] = provider
+
+        self.applications_table.update(updates, doc_ids=[application_id])
+        updated_application = self.get_application(application_id)
+        if updated_application is None:
+            raise RuntimeError("Application disappeared after update")
+        return updated_application
 
 
 def save_job(job_data: dict) -> dict:
