@@ -1,5 +1,9 @@
 from fastapi import Depends, FastAPI
 
+from app.applications import (
+    list_application_records,
+    list_pending_application_records,
+)
 from app.ingestion import ingest_job
 from app.models import JobPosting
 from app.scanner import scan_jobs
@@ -30,6 +34,20 @@ def list_jobs(storage: JobStorage = Depends(get_storage)) -> list[dict]:
 @app.get("/jobs/top")
 def list_top_jobs(storage: JobStorage = Depends(get_storage)) -> list[dict]:
     return storage.list_top_jobs()
+
+
+@app.get("/applications")
+def list_applications(
+    storage: JobStorage = Depends(get_storage),
+) -> list[dict]:
+    return list_application_records(storage)
+
+
+@app.get("/applications/pending")
+def list_pending_applications(
+    storage: JobStorage = Depends(get_storage),
+) -> list[dict]:
+    return list_pending_application_records(storage)
 
 
 @app.post("/jobs", status_code=201)

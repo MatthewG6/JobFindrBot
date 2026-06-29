@@ -88,6 +88,8 @@ GET  /
 GET  /health
 GET  /jobs
 GET  /jobs/top
+GET  /applications
+GET  /applications/pending
 POST /jobs
 POST /jobs/manual
 POST /scan/fake
