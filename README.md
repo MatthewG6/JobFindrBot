@@ -176,9 +176,17 @@ The HTML fixture scanner parses local sample HTML files from `tests/fixtures/` u
 
 This stage proves the app can parse job-card-style HTML safely. Malformed or incomplete cards are skipped instead of crashing the parser.
 
-### 3. Future real scanner
+### 3. First real scanner
 
-A future real scanner may use `requests` and BeautifulSoup against carefully chosen job sources. It should only be added after local parser tests are stable.
+The first real source uses the official [Himalayas public Jobs API](https://himalayas.app/docs/remote-jobs-api). It makes one filtered request for recent entry-level software engineering jobs and sends parsed results through the existing ingestion pipeline.
+
+Run it manually:
+
+```bash
+python scripts/run_himalayas_scan.py
+```
+
+Himalayas data is refreshed every 24 hours, so this scanner should not run more than once per day. Job links point back to [Himalayas](https://himalayas.app), and the source is stored as `himalayas`.
 
 Any real scanner must respect site terms, avoid aggressive scraping, never perform auto-apply behavior, and still send parsed jobs through the existing ingestion pipeline.
 

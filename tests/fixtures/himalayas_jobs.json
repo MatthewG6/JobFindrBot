@@ -1,0 +1,38 @@
+{
+  "updatedAt": 1782676800000,
+  "offset": 0,
+  "limit": 20,
+  "totalCount": 3,
+  "jobs": [
+    {
+      "title": "Junior Software Engineer",
+      "companyName": "Example Remote Company",
+      "applicationLink": "https://himalayas.app/jobs/junior-software-engineer",
+      "description": "<p>Build <strong>React</strong> and TypeScript features.</p>",
+      "pubDate": 1782604800000,
+      "locationRestrictions": [
+        {
+          "alpha2": "US",
+          "name": "United States",
+          "slug": "united-states"
+        }
+      ]
+    },
+    {
+      "title": "Entry-Level Java Developer",
+      "companyName": "Worldwide Example",
+      "applicationLink": "https://himalayas.app/jobs/entry-level-java-developer",
+      "description": "<p>Develop Java cloud services.</p>",
+      "pubDate": "2026-06-27T12:00:00Z",
+      "locationRestrictions": []
+    },
+    {
+      "title": "",
+      "companyName": "Malformed Example",
+      "applicationLink": "",
+      "description": "<p>This item should be skipped.</p>",
+      "locationRestrictions": []
+    },
+    null
+  ]
+}
