@@ -1,8 +1,16 @@
 # Job Radar Assistant
 
-Job Radar Assistant is a personal job-search helper for finding, scoring, saving, and reviewing software engineering job postings.
+Job Radar Assistant is a Discord-operated, human-in-the-loop assistant for
+finding, scoring, reviewing, and applying to software engineering jobs.
 
-The project is designed to run locally on a personal computer. It is not an auto-apply bot, and it should never submit applications or answer sensitive application questions without explicit human approval.
+The project is designed to run locally on a personal computer while Matthew
+controls it remotely through Discord. It should make the application process
+almost hands-free, but it is not an auto-apply bot: unknown questions,
+consequential decisions, and every final submission require human review.
+
+The durable product contract, target Discord workflow, answer-memory rules, and
+approval gates are defined in
+[docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md).
 
 ## Project Goals
 
@@ -10,6 +18,9 @@ The project is designed to run locally on a personal computer. It is not an auto
 - Score jobs based on how well they match Matthew Glassman's target roles and locations.
 - Save job postings in a simple local database.
 - Notify when a posting looks like a strong fit.
+- Coordinate application progress, questions, and confirmations through Discord.
+- Remember approved answers so Matthew is not repeatedly asked the same thing.
+- Present every proposed answer for final review before submission.
 - Keep the code readable, testable, and realistic for a growing developer.
 
 ## Target Roles
@@ -55,7 +66,7 @@ The assistant should avoid or heavily penalize postings that are clearly not a g
 - BeautifulSoup and requests for simple scraping
 - pytest for tests
 - APScheduler or cron for scheduled scans later
-- Telegram bot or Discord webhook for notifications later
+- Discord bot for notifications, commands, questions, and approvals
 
 Not planned for the early version:
 
@@ -250,10 +261,16 @@ pytest
 This project should:
 
 - Run only on a personal machine and personal network.
-- Never submit job applications automatically.
+- Treat Discord as the primary remote control and status interface.
+- Never submit a job application without explicit, application-specific final
+  approval.
 - Never guess legally sensitive answers.
-- Never answer custom application questions without human review.
-- Keep any future browser automation behind explicit approval steps.
+- Pause and ask in Discord when it encounters an unknown, ambiguous, changed,
+  or sensitive question.
+- Reuse stored answers only according to their approval and sensitivity rules.
+- Show every question and proposed answer in a final pre-submission review.
+- Keep browser automation behind the approval gates defined in the
+  [product requirements](docs/PRODUCT_REQUIREMENTS.md).
 
 ## Development Notes
 
