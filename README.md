@@ -106,6 +106,11 @@ POST /jobs/manual
 POST /scan/fake
 ```
 
+The Discord foundation is also available as an explicitly configured local
+process. It currently exposes only `/status`, `/help`, and
+`/test-notification`. None of these commands can begin, advance, or submit an
+application.
+
 `POST /jobs` and `POST /jobs/manual` both use the same ingestion pipeline. `POST /scan/fake` runs two hardcoded sample jobs through that same pipeline so the workflow can be tested without real scraping.
 
 Open the interactive API docs after starting the server:
@@ -205,12 +210,47 @@ Any real scanner must respect site terms, avoid aggressive scraping, never perfo
 
 ## What This Does Not Do Yet
 
-- No real scraping.
-- No notifications.
+- No broad web scraping; the Himalayas API is the only live job source.
+- No automated job or application-progress notifications.
 - No scheduling.
 - No auto-apply behavior.
 - No browser automation.
 - No AI scoring.
+
+## Discord Foundation
+
+The Discord bot is restricted to one configured user, guild, and channel. Its
+slash commands are synchronized only to that guild. Unauthorized commands are
+rejected ephemerally, processed interaction IDs are persisted to prevent
+duplicate work, and message context storage survives local restarts.
+
+Create a Discord application and bot in the Discord Developer Portal, install
+it in your private server with permission to use application commands and send
+messages, and configure:
+
+```text
+DISCORD_BOT_TOKEN
+DISCORD_APPLICATION_ID
+DISCORD_GUILD_ID
+DISCORD_CHANNEL_ID
+DISCORD_ALLOWED_USER_ID
+```
+
+The values are documented in `.env.example`. Keep the real token in the
+environment or a local `.env` file; `.env` is ignored by git. The application
+does not automatically load `.env`, so export the variables or use a trusted
+local process manager that loads them.
+
+Start the bot:
+
+```bash
+python scripts/run_discord_bot.py
+```
+
+The process validates all required configuration before connecting. It uses no
+privileged Discord gateway intents. Keep `discord.enabled` and
+`discord.application_actions_enabled` set to `false` in `config.yaml` until a
+later milestone explicitly wires runtime orchestration and approval gates.
 
 ## Project Structure
 
