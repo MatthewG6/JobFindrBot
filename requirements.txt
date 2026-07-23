@@ -7,3 +7,4 @@ requests
 beautifulsoup4
 pytest
 httpx2
+discord.py>=2.7,<3
