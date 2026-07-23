@@ -27,10 +27,27 @@ def make_settings() -> DiscordSettings:
 
 
 class FakeResponse:
-    def __init__(self) -> None:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
         self.messages: list[tuple[str, bool]] = []
+        self.deferrals: list[tuple[bool, bool]] = []
 
     async def send_message(self, content: str, *, ephemeral: bool) -> None:
+        self.events.append("initial_response")
+        self.messages.append((content, ephemeral))
+
+    async def defer(self, *, ephemeral: bool, thinking: bool) -> None:
+        self.events.append("defer")
+        self.deferrals.append((ephemeral, thinking))
+
+
+class FakeFollowup:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.messages: list[tuple[str, bool]] = []
+
+    async def send(self, content: str, *, ephemeral: bool) -> None:
+        self.events.append("followup")
         self.messages.append((content, ephemeral))
 
 
@@ -47,18 +64,30 @@ class FakeInteraction:
         guild_id: int | None = 202,
         channel_id: int = 303,
     ) -> None:
+        self.events: list[str] = []
         self.id = interaction_id
         self.user = FakeUser(user_id)
         self.guild_id = guild_id
         self.channel_id = channel_id
-        self.response = FakeResponse()
+        self.response = FakeResponse(self.events)
+        self.followup = FakeFollowup(self.events)
 
 
 class FakeGateway:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        events: list[str] | None = None,
+        fail: bool = False,
+    ) -> None:
+        self.events = events
+        self.fail = fail
         self.sent: list[tuple[int, str]] = []
 
     async def send_message(self, channel_id: int, content: str) -> str:
+        if self.events is not None:
+            self.events.append("gateway_send")
+        if self.fail:
+            raise RuntimeError("private gateway failure detail")
         self.sent.append((channel_id, content))
         return "message-1"
 
@@ -108,15 +137,55 @@ def test_duplicate_interaction_does_not_repeat_action(tmp_path: Path) -> None:
 
 
 def test_test_notification_acknowledges_and_sends_once(tmp_path: Path) -> None:
-    controller, gateway = make_controller(tmp_path)
+    settings = make_settings()
+    storage = JobStorage(tmp_path / "jobs.json")
     interaction = FakeInteraction(interaction_id=88)
+    gateway = FakeGateway(events=interaction.events)
+    controller = DiscordInteractionController(
+        access_policy=DiscordAccessPolicy(settings),
+        context_storage=DiscordContextStorage(storage),
+        command_service=DiscordCommandService(storage),
+        notification_service=DiscordNotificationService(settings, gateway),
+    )
 
     asyncio.run(controller.handle_test_notification(interaction))
 
     assert len(gateway.sent) == 1
-    assert interaction.response.messages == [
+    assert interaction.response.deferrals == [(True, True)]
+    assert interaction.events == ["defer", "gateway_send", "followup"]
+    assert interaction.followup.messages == [
         ("Test notification sent to the configured channel.", True)
     ]
+
+
+def test_test_notification_failure_follows_deferred_acknowledgement(
+    tmp_path: Path,
+) -> None:
+    settings = make_settings()
+    storage = JobStorage(tmp_path / "jobs.json")
+    interaction = FakeInteraction(interaction_id=89)
+    gateway = FakeGateway(events=interaction.events, fail=True)
+    controller = DiscordInteractionController(
+        access_policy=DiscordAccessPolicy(settings),
+        context_storage=DiscordContextStorage(storage),
+        command_service=DiscordCommandService(storage),
+        notification_service=DiscordNotificationService(settings, gateway),
+    )
+
+    asyncio.run(controller.handle_test_notification(interaction))
+
+    assert interaction.response.deferrals == [(True, True)]
+    assert interaction.events == ["defer", "gateway_send", "followup"]
+    assert interaction.followup.messages == [
+        (
+            "Discord could not send the test notification. "
+            "Check the configured channel and bot permissions.",
+            True,
+        )
+    ]
+    assert "private gateway failure detail" not in str(
+        interaction.followup.messages
+    )
 
 
 class FakeChannel:

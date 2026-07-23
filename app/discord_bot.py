@@ -23,12 +23,31 @@ class InteractionResponse(Protocol):
     ) -> Awaitable[None]:
         """Respond to a Discord interaction."""
 
+    def defer(
+        self,
+        *,
+        ephemeral: bool,
+        thinking: bool,
+    ) -> Awaitable[None]:
+        """Acknowledge an interaction before slower external work."""
+
+
+class InteractionFollowup(Protocol):
+    def send(
+        self,
+        content: str,
+        *,
+        ephemeral: bool,
+    ) -> Awaitable[object]:
+        """Send a result after the initial interaction acknowledgement."""
+
 
 class CommandInteraction(Protocol):
     id: int
     guild_id: int | None
     channel_id: int
     response: InteractionResponse
+    followup: InteractionFollowup
 
     @property
     def user(self) -> object:
@@ -95,17 +114,18 @@ class DiscordInteractionController:
         if not await self.authorize_and_claim(interaction):
             return
 
+        await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             await self.notification_service.send_test_notification()
         except DiscordNotificationError:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Discord could not send the test notification. "
                 "Check the configured channel and bot permissions.",
                 ephemeral=True,
             )
             return
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "Test notification sent to the configured channel.",
             ephemeral=True,
         )
