@@ -40,6 +40,10 @@ class LaunchAgentManager:
         user_id: int | None = None,
         command_runner: CommandRunner = subprocess.run,
     ) -> None:
+        if user_id is None and os.geteuid() == 0:
+            raise PermissionError(
+                "Do not manage the JobFindrBot LaunchAgent with sudo"
+            )
         self.project_root = project_root.resolve()
         self.home_directory = (home_directory or Path.home()).resolve()
         self.user_id = user_id if user_id is not None else os.getuid()
@@ -50,6 +54,7 @@ class LaunchAgentManager:
             / "LaunchAgents"
             / f"{LAUNCH_AGENT_LABEL}.plist"
         )
+        self.log_directory = self.project_root / "data" / "logs"
 
     @property
     def domain(self) -> str:
@@ -75,10 +80,12 @@ class LaunchAgentManager:
     def write_plist(self) -> None:
         self.validate_runtime()
         self.plist_path.parent.mkdir(parents=True, exist_ok=True)
-        (self.project_root / "data" / "logs").mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        self.log_directory.mkdir(parents=True, exist_ok=True)
+        self.log_directory.chmod(0o700)
+        for filename in ("discord-bot.log", "discord-bot.error.log"):
+            log_path = self.log_directory / filename
+            log_path.touch(exist_ok=True)
+            log_path.chmod(0o600)
 
         temporary_path = self.plist_path.with_suffix(".plist.tmp")
         temporary_path.write_bytes(
@@ -87,19 +94,44 @@ class LaunchAgentManager:
         temporary_path.chmod(0o600)
         temporary_path.replace(self.plist_path)
 
-    def install(self) -> None:
-        already_installed = self.plist_path.exists()
-        if already_installed:
-            self.command_runner(
-                [
-                    "launchctl",
-                    "bootout",
-                    self.domain,
-                    str(self.plist_path),
-                ],
-                check=False,
+    def is_loaded(self) -> bool:
+        result = self.command_runner(
+            ["launchctl", "print", self.service_target],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return True
+        if result.returncode == 113:
+            return False
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+
+    def unload_if_loaded(self) -> None:
+        if not self.is_loaded():
+            return
+
+        result = self.command_runner(
+            ["launchctl", "bootout", self.service_target],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                result.args,
+                output=result.stdout,
+                stderr=result.stderr,
             )
 
+    def install(self) -> None:
+        self.unload_if_loaded()
         self.write_plist()
         self.command_runner(
             [
@@ -128,16 +160,6 @@ class LaunchAgentManager:
         return result.stdout
 
     def uninstall(self) -> None:
-        if not self.plist_path.exists():
-            return
-
-        self.command_runner(
-            [
-                "launchctl",
-                "bootout",
-                self.domain,
-                str(self.plist_path),
-            ],
-            check=False,
-        )
-        self.plist_path.unlink()
+        self.unload_if_loaded()
+        if self.plist_path.exists():
+            self.plist_path.unlink()

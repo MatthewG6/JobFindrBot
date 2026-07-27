@@ -260,6 +260,10 @@ environment and `.env` are configured:
 python scripts/manage_discord_service.py install
 ```
 
+Run service-management commands as your normal macOS user. Do not use `sudo`;
+the installer intentionally rejects root execution so it cannot target the
+wrong home directory or launchd domain.
+
 The service:
 
 - starts when Matthew logs in;
