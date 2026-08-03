@@ -9,6 +9,7 @@ venv/
 env/
 
 data/*.json
+data/*.lock
 !data/.gitkeep
 
 .env

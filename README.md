@@ -93,9 +93,16 @@ GET  /applications/pending
 POST /jobs
 POST /jobs/manual
 POST /scan/fake
+POST /applications/candidates
+POST /applications/{application_id}/approve
+POST /applications/{application_id}/reject
+POST /applications/{application_id}/approve-submit
+POST /applications/{application_id}/transitions
 ```
 
 `POST /jobs` and `POST /jobs/manual` both use the same ingestion pipeline. `POST /scan/fake` runs two hardcoded sample jobs through that same pipeline so the workflow can be tested without real scraping.
+`POST /applications/candidates` creates approval-ready application records for saved jobs whose fit score meets the application threshold.
+Application actions enforce the supported status workflow and append every change to the application's event history. Starting and submitting each require a dedicated approval action, and the approval type and approver are recorded. Invalid status jumps return `409 Conflict` without changing the application.
 
 Open the interactive API docs after starting the server:
 
@@ -136,6 +143,9 @@ GET  /health
 POST /scan/fake
 GET  /jobs
 GET  /jobs/top
+POST /applications/candidates
+GET  /applications/pending
+POST /applications/{application_id}/approve
 ```
 
 The demo flow is:
@@ -143,6 +153,11 @@ The demo flow is:
 1. Run the fake scan.
 2. View saved jobs with `GET /jobs`.
 3. View the best saved jobs first with `GET /jobs/top`.
+4. Create application candidates for strong matches.
+5. Review pending application candidates before taking any application action.
+6. Approve or reject each candidate.
+7. Record later workflow steps with `POST /applications/{application_id}/transitions`.
+8. Explicitly approve submission with `POST /applications/{application_id}/approve-submit` before recording the final `submitted` transition.
 
 You can also run the fake scan from the terminal:
 
