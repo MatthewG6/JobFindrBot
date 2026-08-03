@@ -13,4 +13,8 @@ data/*.lock
 !data/.gitkeep
 
 .env
+credentials/
+secrets/
+credentials.json
+token.json
 .codex/

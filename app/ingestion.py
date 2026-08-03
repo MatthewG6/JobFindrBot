@@ -17,17 +17,16 @@ def ingest_job(job: JobPosting, storage: JobStorage) -> dict:
     job_data["score_reasons"] = scored_job.reasons
     job_data["red_flags"] = scored_job.red_flags
 
-    existing_job = storage.find_duplicate(job_data)
-    if existing_job is not None:
+    saved_job, created = storage.save_job_with_status(job_data)
+    if not created:
         return {
             "created": False,
-            "job": existing_job,
-            "score": existing_job.get("fit_score", scored_job.score),
-            "reasons": existing_job.get("score_reasons", scored_job.reasons),
-            "red_flags": existing_job.get("red_flags", scored_job.red_flags),
+            "job": saved_job,
+            "score": saved_job.get("fit_score", scored_job.score),
+            "reasons": saved_job.get("score_reasons", scored_job.reasons),
+            "red_flags": saved_job.get("red_flags", scored_job.red_flags),
         }
 
-    saved_job = storage.save_job(job_data)
     return {
         "created": True,
         "job": saved_job,

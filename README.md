@@ -207,11 +207,27 @@ Himalayas data is refreshed every 24 hours, so this scanner should not run more 
 
 Any real scanner must respect site terms, avoid aggressive scraping, never perform auto-apply behavior, and still send parsed jobs through the existing ingestion pipeline.
 
+### 4. Job alert email ingestion foundation
+
+The app includes parsers for the plain-text MIME parts of LinkedIn and Indeed
+job-alert emails. Parsed cards are normalized into `JobPosting` records and use
+the shared scoring and deduplication pipeline. A `processed_emails` TinyDB table
+tracks Gmail message IDs so repeated scans do not import the same message again.
+Messages must carry the expected Gmail label and a passing Google-recorded DMARC
+result. Provider links are restricted to HTTPS URLs on the expected domain;
+opaque Indeed email redirects are replaced with token-free Indeed search URLs.
+
+This milestone does not connect to Gmail yet. The next stage will use a local
+Google OAuth client with the read-only Gmail scope to fetch messages from the
+`Jobbot-LinkedIn` and `Jobbot-Indeed` labels. OAuth credentials and tokens are
+excluded from Git.
+
 ## What This Does Not Do Yet
 
 - No real scraping.
 - No notifications.
 - No scheduling.
+- No Gmail OAuth connection yet.
 - No auto-apply behavior.
 - No browser automation.
 - No AI scoring.

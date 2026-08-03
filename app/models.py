@@ -16,6 +16,11 @@ class JobPosting(BaseModel):
     url: HttpUrl
     source: str
     description: str = ""
+    source_job_id: str | None = None
+    source_message_id: str | None = None
+    alert_query: str | None = None
+    salary_text: str | None = None
+    posted_text: str | None = None
     posted_at: datetime | None = None
     discovered_at: datetime = Field(default_factory=utc_now)
     created_at: datetime = Field(default_factory=utc_now)
@@ -152,6 +157,17 @@ NonBlankString = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1),
 ]
+
+
+class JobAlertEmail(BaseModel):
+    message_id: NonBlankString
+    sender: NonBlankString
+    subject: NonBlankString
+    received_at: datetime
+    gmail_labels: set[str]
+    authentication_results: NonBlankString
+    text_body: str = ""
+    html_body: str = ""
 
 
 class ApplicationTransitionRequest(BaseModel):

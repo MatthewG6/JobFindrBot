@@ -1,7 +1,9 @@
 import fcntl
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock, RLock, local
 from types import TracebackType
+from typing import Iterator
 
 from tinydb import Query, TinyDB
 
@@ -69,6 +71,10 @@ class DatabaseLock:
         finally:
             self._thread_lock.release()
 
+    @property
+    def depth(self) -> int:
+        return getattr(self._local, "depth", 0)
+
 
 def database_lock(db_path: Path) -> DatabaseLock:
     resolved_path = db_path.resolve()
@@ -82,14 +88,49 @@ def database_lock(db_path: Path) -> DatabaseLock:
 class JobStorage:
     def __init__(self, db_path: Path = DEFAULT_DB_PATH) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._db_path = db_path
         self._lock = database_lock(db_path)
         with self._lock:
-            self.db = TinyDB(db_path)
-            self.jobs_table = self.db.table("jobs")
-            self.applications_table = self.db.table("applications")
+            self.db = TinyDB(self._db_path)
+            self._set_tables()
+
+    def _set_tables(self) -> None:
+        self.jobs_table = self.db.table("jobs")
+        self.applications_table = self.db.table("applications")
+        self.processed_emails_table = self.db.table("processed_emails")
+
+    def _reload(self) -> None:
+        self.db.close()
+        self.db = TinyDB(self._db_path)
+        self._set_tables()
+
+    @contextmanager
+    def _access(self) -> Iterator[None]:
+        with self._lock:
+            if self._lock.depth == 1:
+                self._reload()
+            yield
+
+    @contextmanager
+    def transaction(self) -> Iterator["JobStorage"]:
+        """Hold a fresh database view and roll back failed multi-step writes."""
+        with self._access():
+            snapshot = self._db_path.read_bytes()
+            try:
+                yield self
+            except BaseException:
+                self.db.close()
+                rollback_path = self._db_path.with_suffix(
+                    f"{self._db_path.suffix}.rollback"
+                )
+                rollback_path.write_bytes(snapshot)
+                rollback_path.replace(self._db_path)
+                self.db = TinyDB(self._db_path)
+                self._set_tables()
+                raise
 
     def find_duplicate(self, job_data: dict) -> dict | None:
-        with self._lock:
+        with self._access():
             jobs = Query()
             content_hash = job_data.get("content_hash")
             url = job_data.get("url")
@@ -107,7 +148,14 @@ class JobStorage:
             return {"id": existing.doc_id, **existing}
 
     def save_job(self, job_data: dict | JobPosting) -> dict:
-        with self._lock:
+        saved_job, _ = self.save_job_with_status(job_data)
+        return saved_job
+
+    def save_job_with_status(
+        self,
+        job_data: dict | JobPosting,
+    ) -> tuple[dict, bool]:
+        with self._access():
             if isinstance(job_data, JobPosting):
                 job = job_data
                 data = job.model_dump(mode="json")
@@ -117,13 +165,13 @@ class JobStorage:
 
             existing = self.find_duplicate(data)
             if existing is not None:
-                return existing
+                return existing, False
 
             document_id = self.jobs_table.insert(data)
-            return {"id": document_id, **data}
+            return {"id": document_id, **data}, True
 
     def list_jobs(self) -> list[dict]:
-        with self._lock:
+        with self._access():
             return [{"id": job.doc_id, **job} for job in self.jobs_table.all()]
 
     def list_top_jobs(self) -> list[dict]:
@@ -134,18 +182,57 @@ class JobStorage:
         )
 
     def clear_jobs(self) -> None:
-        with self._lock:
+        with self._access():
             self.jobs_table.truncate()
 
+    def get_processed_email(self, message_id: str) -> dict | None:
+        with self._access():
+            emails = Query()
+            email = self.processed_emails_table.get(
+                emails.message_id == message_id
+            )
+            if email is None:
+                return None
+            return {"id": email.doc_id, **email}
+
+    def list_processed_emails(self) -> list[dict]:
+        with self._access():
+            return [
+                {"id": email.doc_id, **email}
+                for email in self.processed_emails_table.all()
+            ]
+
+    def mark_email_processed(
+        self,
+        message_id: str,
+        source: str,
+        job_count: int,
+        created_count: int,
+    ) -> dict:
+        with self._access():
+            existing = self.get_processed_email(message_id)
+            if existing is not None:
+                return existing
+
+            data = {
+                "message_id": message_id,
+                "source": source,
+                "job_count": job_count,
+                "created_count": created_count,
+                "processed_at": utc_now().isoformat(),
+            }
+            document_id = self.processed_emails_table.insert(data)
+            return {"id": document_id, **data}
+
     def get_application(self, application_id: int) -> dict | None:
-        with self._lock:
+        with self._access():
             application = self.applications_table.get(doc_id=application_id)
             if application is None:
                 return None
             return {"id": application.doc_id, **application}
 
     def list_applications(self) -> list[dict]:
-        with self._lock:
+        with self._access():
             return [
                 {"id": application.doc_id, **application}
                 for application in self.applications_table.all()
@@ -157,7 +244,7 @@ class JobStorage:
         initial_message: str | None = None,
         current_step: str | None = None,
     ) -> dict:
-        with self._lock:
+        with self._access():
             if not self.jobs_table.contains(doc_id=job_id):
                 raise ValueError(f"Job {job_id} does not exist")
 
@@ -197,7 +284,7 @@ class JobStorage:
         approved_by: str | None = None,
         expected_status: ApplicationStatus | str | None = None,
     ) -> dict:
-        with self._lock:
+        with self._access():
             application = self.get_application(application_id)
             if application is None:
                 raise ValueError(f"Application {application_id} does not exist")

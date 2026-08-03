@@ -66,3 +66,24 @@ def test_save_job_dedupe_ignores_extra_spacing_and_capitalization(tmp_path: Path
 
     assert duplicate_saved_job["id"] == 1
     assert len(jobs) == 1
+
+
+def test_mark_email_processed_is_idempotent(tmp_path: Path) -> None:
+    storage = JobStorage(tmp_path / "jobs.json")
+
+    first = storage.mark_email_processed(
+        message_id="fake-message-id",
+        source="linkedin_email",
+        job_count=2,
+        created_count=2,
+    )
+    second = storage.mark_email_processed(
+        message_id="fake-message-id",
+        source="linkedin_email",
+        job_count=99,
+        created_count=99,
+    )
+
+    assert first == second
+    assert len(storage.list_processed_emails()) == 1
+    assert storage.get_processed_email("fake-message-id") == first

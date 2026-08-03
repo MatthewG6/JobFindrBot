@@ -1,0 +1,35 @@
+Your job alert is active
+
+You'll receive your first daily job alert for full stack developer in Minnesota when jobs become available.
+
+In the meantime, you can browse new jobs on Indeed any time by copying and pasting the link below
+
+https://engage.indeed.com/f/a/FAKE_SEARCH_REDIRECT
+
+3 new full stack developer jobs in Minnesota
+
+Java Full Stack Developer
+Northwind Consulting - Minneapolis, MN
+$70,000 - $95,000 a year
+Easily apply
+Build and maintain Java and React applications for a product team.
+4 days ago
+https://engage.indeed.com/f/a/FAKE_JOB_REDIRECT_ONE
+
+Java Full Stack Developer
+Northwind Consulting - Minneapolis, MN
+$70,000 - $95,000 a year
+Easily apply
+Build and maintain Java and React applications for a product team.
+4 days ago
+https://engage.indeed.com/f/a/FAKE_JOB_REDIRECT_DUPLICATE
+
+Associate Software Engineer
+Fabrikam Software - Rochester, MN
+Responsive employer
+Develop TypeScript services and cloud integrations.
+Today
+https://www.indeed.com/viewjob?jk=fake-job-key-123&utm_source=jobseeker_emails
+
+© 2026 Indeed Example, Inc.
+Privacy Policy: https://indeed.example/privacy
