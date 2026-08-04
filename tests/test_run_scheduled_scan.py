@@ -58,6 +58,17 @@ def notification_summary(errors: list | None = None) -> dict:
     }
 
 
+def resolver_summary(errors: list | None = None) -> dict:
+    return {
+        "jobs_considered": 2,
+        "jobs_resolved": 1,
+        "jobs_already_resolved": 3,
+        "jobs_pending": 1,
+        "jobs_manual_required": 0,
+        "errors": errors or [],
+    }
+
+
 def test_first_scheduled_run_scans_all_configured_sources(
     tmp_path: Path,
 ) -> None:
@@ -159,13 +170,40 @@ def test_discord_runs_after_job_sources(tmp_path: Path) -> None:
             "remotive": lambda storage: calls.append("remotive")
             or source_summary()
         },
+        resolver_runner=lambda storage: calls.append("resolver")
+        or resolver_summary(),
         notification_runner=lambda storage: calls.append("discord")
         or notification_summary(),
     )
 
-    assert calls == ["gmail", "remotive", "discord"]
+    assert calls == ["gmail", "remotive", "resolver", "discord"]
     assert summary["discord"]["status"] == "ok"
     assert summary["errors"] == []
+
+
+def test_resolver_failure_is_isolated_before_discord(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def fail_resolver(storage: JobStorage) -> dict:
+        calls.append("resolver")
+        raise RuntimeError("private resolver detail")
+
+    summary = run_scheduled_scan(
+        storage=JobStorage(tmp_path / "jobs.json"),
+        state_path=tmp_path / "state.json",
+        now=NOW,
+        gmail_runner=lambda storage: gmail_summary(),
+        source_runners={},
+        resolver_runner=fail_resolver,
+        notification_runner=lambda storage: calls.append("discord")
+        or notification_summary(),
+    )
+
+    assert calls == ["resolver", "discord"]
+    assert summary["resolver"] == {"status": "failed"}
+    assert summary["errors"] == [
+        {"source": "resolver", "error_type": "RuntimeError"}
+    ]
 
 
 def test_discord_not_configured_does_not_fail_scheduler(tmp_path: Path) -> None:

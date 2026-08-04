@@ -15,9 +15,16 @@ flowchart LR
     Apply --> Submit["Explicit submission approval"]
 ```
 
-The resolver, enrichment, Scoring V2, dashboard, and ATS assistance nodes are V1
-work in progress. Discovery, ingestion, current scoring, Discord, persistence,
-scheduling, and application approval records are operational.
+The deterministic resolver is operational for captured official links, exact
+employer-board matches, and manual handoff. Enrichment, Scoring V2, dashboard,
+and ATS assistance remain V1 work in progress. Discovery, ingestion, current
+scoring, Discord, persistence, scheduling, and application approval records are
+operational.
+
+The resolver retains every incoming URL as provenance. LinkedIn, Indeed, and
+aggregator URLs remain discovery links; only validated public HTTPS employer/ATS
+links become application URLs. Automatic matching requires one unambiguous exact
+company/title match with a compatible location.
 
 ## Trust Boundaries
 

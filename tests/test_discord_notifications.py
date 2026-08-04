@@ -188,6 +188,23 @@ def test_job_payload_neutralizes_untrusted_markdown_links() -> None:
     assert "https://" not in title
 
 
+def test_job_payload_prefers_resolved_application_url() -> None:
+    payload = job_notification_payload(
+        {
+            "id": 1,
+            "title": "Software Engineer",
+            "company": "Example",
+            "fit_score": 50,
+            "url": "https://www.linkedin.com/jobs/view/123",
+            "application_url": "https://careers.example.com/jobs/456",
+        }
+    )
+
+    assert payload["embeds"][0]["url"] == (
+        "https://careers.example.com/jobs/456"
+    )
+
+
 def test_webhook_client_posts_with_confirmation_and_no_redirects(
     monkeypatch,
 ) -> None:

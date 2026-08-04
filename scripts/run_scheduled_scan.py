@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.gmail_client import DEFAULT_GMAIL_DB_PATH, GmailJobAlertClient
+from app.employer_resolver import resolve_employer_sites
 from app.operational_metrics import append_scheduler_metric, scheduler_metric
 from app.discord_notifications import (
     DiscordNotConfigured,
@@ -43,6 +44,7 @@ SOURCE_INTERVALS = {
 }
 SourceRunner = Callable[[JobStorage], dict]
 NotificationRunner = Callable[[JobStorage], dict]
+ResolverRunner = Callable[[JobStorage], dict]
 
 
 def default_source_runners() -> dict[str, SourceRunner]:
@@ -210,6 +212,27 @@ def validate_notification_summary(summary: object) -> dict:
     return summary
 
 
+def validate_resolver_summary(summary: object) -> dict:
+    if not isinstance(summary, dict) or not isinstance(summary.get("errors"), list):
+        raise ValueError("Resolver returned an invalid summary")
+    for key in (
+        "jobs_considered",
+        "jobs_resolved",
+        "jobs_already_resolved",
+        "jobs_pending",
+        "jobs_manual_required",
+    ):
+        required_nonnegative_int(summary, key)
+    outcomes = (
+        summary["jobs_resolved"]
+        + summary["jobs_pending"]
+        + summary["jobs_manual_required"]
+    )
+    if outcomes != summary["jobs_considered"]:
+        raise ValueError("Resolver summary counts do not balance")
+    return summary
+
+
 def default_gmail_runner(storage: JobStorage) -> dict:
     client = GmailJobAlertClient.from_local_oauth(allow_interactive=False)
     return run_gmail_scan(storage=storage, client=client)
@@ -217,6 +240,10 @@ def default_gmail_runner(storage: JobStorage) -> dict:
 
 def default_notification_runner(storage: JobStorage) -> dict:
     return run_discord_notifications(storage)
+
+
+def default_resolver_runner(storage: JobStorage) -> dict:
+    return resolve_employer_sites(storage)
 
 
 def run_scheduled_scan(
@@ -227,6 +254,7 @@ def run_scheduled_scan(
     gmail_runner: SourceRunner = default_gmail_runner,
     source_runners: Mapping[str, SourceRunner] | None = None,
     himalayas_runner: SourceRunner | None = None,
+    resolver_runner: ResolverRunner | None = default_resolver_runner,
     notification_runner: NotificationRunner | None = None,
 ) -> dict:
     storage = storage or JobStorage(DEFAULT_GMAIL_DB_PATH)
@@ -257,6 +285,7 @@ def run_scheduled_scan(
     summary: dict = {
         "gmail": None,
         "sources": {},
+        "resolver": None,
         "discord": None,
         "errors": errors,
     }
@@ -338,6 +367,22 @@ def run_scheduled_scan(
                 {"source": "scheduler_state", "error_type": type(error).__name__}
             )
 
+    if resolver_runner is not None:
+        try:
+            resolver_summary = validate_resolver_summary(
+                resolver_runner(storage)
+            )
+            summary["resolver"] = resolver_summary
+            if resolver_summary["errors"]:
+                errors.append(
+                    {"source": "resolver", "error_type": "ResolverItemErrors"}
+                )
+        except Exception as error:
+            summary["resolver"] = {"status": "failed"}
+            errors.append(
+                {"source": "resolver", "error_type": type(error).__name__}
+            )
+
     if notification_runner is not None:
         try:
             discord_summary = validate_notification_summary(
@@ -388,6 +433,21 @@ def print_summary(summary: dict) -> None:
                 f"rejected={source_summary['records_rejected']} "
                 f"errors={len(source_summary['errors'])}"
             )
+
+    resolver = summary.get("resolver")
+    if resolver is None:
+        print("resolver: disabled")
+    elif resolver == {"status": "failed"}:
+        print("resolver: failed")
+    else:
+        print(
+            "resolver: "
+            f"considered={resolver['jobs_considered']} "
+            f"resolved={resolver['jobs_resolved']} "
+            f"pending={resolver['jobs_pending']} "
+            f"manual={resolver['jobs_manual_required']} "
+            f"errors={len(resolver['errors'])}"
+        )
 
     discord = summary.get("discord")
     if discord is None:
@@ -479,6 +539,7 @@ def main() -> None:
             failure_summary = {
                 "gmail": None,
                 "sources": {},
+                "resolver": None,
                 "discord": None,
                 "errors": [
                     {

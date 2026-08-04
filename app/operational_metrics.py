@@ -40,6 +40,7 @@ def scheduler_metric(
 ) -> dict:
     gmail = summary.get("gmail")
     discord = summary.get("discord")
+    resolver = summary.get("resolver")
     sources = {}
     for name, result in summary.get("sources", {}).items():
         source_summary = result.get("summary") or {}
@@ -71,6 +72,20 @@ def scheduler_metric(
             }
         ),
         "sources": sources,
+        "resolver": (
+            None
+            if resolver is None or resolver.get("status") == "failed"
+            else {
+                "jobs_considered": resolver.get("jobs_considered", 0),
+                "jobs_resolved": resolver.get("jobs_resolved", 0),
+                "jobs_pending": resolver.get("jobs_pending", 0),
+                "jobs_manual_required": resolver.get(
+                    "jobs_manual_required",
+                    0,
+                ),
+                "error_count": len(resolver.get("errors", [])),
+            }
+        ),
         "discord": (
             None
             if discord is None

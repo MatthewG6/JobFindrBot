@@ -82,11 +82,12 @@ Not planned for the early version:
 
 Jobbot runs locally every 30 minutes. It ingests labeled LinkedIn and Indeed
 alerts from Gmail, scans compliant job APIs and employer boards at provider-safe
-intervals, deduplicates and scores jobs, and sends new high-fit results to
+intervals, preserves every source link, resolves high-confidence matches to
+official application URLs, scores jobs, and sends new high-fit results to
 Discord. Application records require separate approval to start and submit.
 
-Employer-site resolution, full-posting enrichment, Scoring V2, the review
-dashboard, and approved ATS assistance remain V1 work in progress. See the
+Full-posting enrichment, Scoring V2, the review dashboard, and approved ATS
+assistance remain V1 work in progress. See the
 [V1 definition of done](docs/V1_ROADMAP.md) and
 [architecture](docs/ARCHITECTURE.md).
 
@@ -275,7 +276,33 @@ python scripts/run_usajobs_scan.py
 
 Any real scanner must respect site terms, avoid aggressive scraping, never perform auto-apply behavior, and still send parsed jobs through the existing ingestion pipeline.
 
-### 4. Job alert email ingestion foundation
+### 4. Employer-site resolution
+
+Every ingested URL is stored with its source and classified as discovery or
+official provenance. After source scans, Jobbot resolves email-discovered jobs
+when exactly one official Greenhouse, Lever, or USAJOBS posting matches the same
+normalized company, title, and compatible location. Ambiguous matches require
+manual review; unresolved jobs remain pending for later scans.
+
+Run the deterministic resolver manually:
+
+```bash
+python scripts/run_employer_resolution.py
+```
+
+Provide a reviewed employer or ATS URL when no automatic match exists:
+
+```bash
+python scripts/run_employer_resolution.py \
+  --job-id JOB_ID \
+  --application-url https://careers.example.com/jobs/JOB_ID
+```
+
+Manual URLs must be public HTTPS destinations and cannot point back to LinkedIn,
+Indeed, or another discovery aggregator. This stage does not visit provider pages
+or launch Playwright.
+
+### 5. Job alert email ingestion foundation
 
 The app includes parsers for the plain-text MIME parts of LinkedIn and Indeed
 job-alert emails. Parsed cards are normalized into `JobPosting` records and use
@@ -468,8 +495,13 @@ later milestone explicitly wires runtime orchestration and approval gates.
 app/
   __init__.py
   candidate_profile.py
+  discord_bot.py
+  discord_config.py
   discord_notifications.py
+  discord_service.py
   email_ingestion.py
+  employer_resolver.py
+  job_links.py
   job_sources.py
   main.py
   models.py
@@ -485,10 +517,13 @@ config/
   employer_watchlist.json
 docs/
   ARCHITECTURE.md
+  PRODUCT_REQUIREMENTS.md
   V1_ROADMAP.md
 data/
   .gitkeep
 scripts/
+  run_discord_bot.py
+  run_employer_resolution.py
   run_scheduled_scan.py
   run_scoring_benchmark.py
 tests/

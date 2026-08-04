@@ -15,6 +15,7 @@ from weakref import WeakSet
 from tinydb import Query, TinyDB
 
 from app.dedupe import job_content_hash
+from app.job_links import job_link_role, validate_manual_application_url
 from app.models import (
     ApplicationEvent,
     ApplicationRecord,
@@ -27,7 +28,7 @@ from app.models import (
 
 
 DEFAULT_DB_PATH = Path("data/jobs.json")
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 DEFAULT_BACKUP_RETENTION = 14
 _DATABASE_LOCKS: dict[Path, "DatabaseLock"] = {}
 _DATABASE_LOCKS_GUARD = Lock()
@@ -172,6 +173,7 @@ class JobStorage:
             "discord_interactions"
         )
         self.discord_contexts_table = self.db.table("discord_contexts")
+        self.job_links_table = self.db.table("job_links")
         self.schema_metadata_table = self.db.table("schema_metadata")
 
     def _ensure_schema(self) -> None:
@@ -300,6 +302,17 @@ class JobStorage:
 
     def _apply_migration(self, version: int) -> None:
         if version == 1:
+            return
+        if version == 2:
+            now = utc_now().isoformat()
+            for job in self.jobs_table.all():
+                data = dict(job)
+                url = data.get("url")
+                source = data.get("source", "unknown")
+                role = job_link_role(source, url)
+                resolution = self._resolution_defaults(data, role, now)
+                self.jobs_table.update(resolution, doc_ids=[job.doc_id])
+                self._register_job_link(job.doc_id, data, role=role, now=now)
             return
         raise ValueError(f"Unsupported database migration: {version}")
 
@@ -578,14 +591,147 @@ class JobStorage:
 
             existing = self.find_duplicate(data)
             if existing is not None:
+                self._register_job_link(existing["id"], data)
                 return existing, False
 
+            role = job_link_role(data.get("source"), data.get("url"))
+            data.update(self._resolution_defaults(data, role))
             document_id = self.jobs_table.insert(data)
+            self._register_job_link(document_id, data, role=role)
             return {**data, "id": document_id}, True
+
+    def _resolution_defaults(
+        self,
+        data: dict,
+        role: str,
+        now: str | None = None,
+    ) -> dict:
+        now = now or utc_now().isoformat()
+        url = data.get("url")
+        resolved = role == "official"
+        return {
+            "discovery_url": data.get("discovery_url") or url,
+            "application_url": url if resolved else data.get("application_url"),
+            "resolution_status": "resolved" if resolved else "pending",
+            "resolution_method": "source_official" if resolved else None,
+            "resolution_confidence": 1.0 if resolved else None,
+            "resolved_at": now if resolved else None,
+        }
+
+    def _register_job_link(
+        self,
+        job_id: int,
+        data: dict,
+        *,
+        role: str | None = None,
+        now: str | None = None,
+    ) -> None:
+        url = data.get("url")
+        if not isinstance(url, str) or not url.strip():
+            return
+        url = url.strip()
+        source = str(data.get("source") or "unknown").strip().lower()
+        links = Query()
+        if self.job_links_table.contains(
+            (links.job_id == job_id)
+            & (links.url == url)
+            & (links.source == source)
+        ):
+            return
+        self.job_links_table.insert(
+            {
+                "job_id": job_id,
+                "url": url,
+                "source": source,
+                "source_job_id": data.get("source_job_id"),
+                "role": role or job_link_role(source, url),
+                "discovered_at": data.get("discovered_at"),
+                "created_at": now or utc_now().isoformat(),
+            }
+        )
 
     def list_jobs(self) -> list[dict]:
         with self._access():
             return [{**job, "id": job.doc_id} for job in self.jobs_table.all()]
+
+    def get_job(self, job_id: int) -> dict | None:
+        with self._access():
+            job = self.jobs_table.get(doc_id=job_id)
+            return None if job is None else {**job, "id": job.doc_id}
+
+    def list_job_links(self, job_id: int | None = None) -> list[dict]:
+        with self._access():
+            if job_id is None:
+                links = self.job_links_table.all()
+            else:
+                query = Query()
+                links = self.job_links_table.search(query.job_id == job_id)
+            return [{**link, "id": link.doc_id} for link in links]
+
+    def add_job_link(
+        self,
+        job_id: int,
+        *,
+        url: str,
+        source: str,
+        role: str,
+        source_job_id: str | None = None,
+    ) -> None:
+        if role not in {"discovery", "official"}:
+            raise ValueError("Job link role is invalid")
+        if role == "official" and job_link_role(source, url) != "official":
+            raise ValueError("Official job link source and URL do not match")
+        with self._access():
+            if self.jobs_table.get(doc_id=job_id) is None:
+                raise ValueError("Job does not exist")
+            self._register_job_link(
+                job_id,
+                {
+                    "url": url,
+                    "source": source,
+                    "source_job_id": source_job_id,
+                },
+                role=role,
+            )
+
+    def update_job_resolution(
+        self,
+        job_id: int,
+        *,
+        status: str,
+        application_url: str | None,
+        method: str | None,
+        confidence: float | None,
+    ) -> dict:
+        if status not in {"pending", "resolved", "manual_required"}:
+            raise ValueError("Job resolution status is invalid")
+        if status == "resolved":
+            application_url = validate_manual_application_url(application_url)
+            if (
+                not method
+                or isinstance(confidence, bool)
+                or not isinstance(confidence, (int, float))
+                or not 0 <= confidence <= 1
+            ):
+                raise ValueError("Resolved jobs require valid resolution evidence")
+        elif application_url is not None or confidence is not None:
+            raise ValueError("Unresolved jobs cannot have an application URL")
+        with self._access():
+            job = self.jobs_table.get(doc_id=job_id)
+            if job is None:
+                raise ValueError("Job does not exist")
+            updates = {
+                "resolution_status": status,
+                "application_url": application_url,
+                "resolution_method": method,
+                "resolution_confidence": confidence,
+                "resolved_at": (
+                    utc_now().isoformat() if status == "resolved" else None
+                ),
+            }
+            self.jobs_table.update(updates, doc_ids=[job_id])
+            refreshed = self.jobs_table.get(doc_id=job_id)
+            return {**refreshed, "id": refreshed.doc_id}
 
     def list_top_jobs(self) -> list[dict]:
         return sorted(
