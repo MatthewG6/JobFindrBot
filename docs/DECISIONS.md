@@ -159,3 +159,20 @@ remains in this file and links to the decision that replaced it.
 - Consequence: Answer-bank and application-profile persistence cannot begin until
   encryption, key recovery, backup purge, and redaction behavior have tests and
   the sensitive-data restore drill passes.
+
+## D016 - Bounded provider destination resolution
+
+- Status: accepted on 2026-08-04
+- Decision: Jobbot may make read-only requests to Adzuna, Remotive, and Himalayas
+  job pages to resolve a validated employer or ATS destination. LinkedIn and
+  Indeed remain request-free discovery providers.
+- Decision: Resolution accepts only a source-specific exact apply-link label or a
+  redirect that reaches one public HTTPS non-discovery destination. Requests use
+  public-DNS validation, pinned HTTPS, bounded redirects and response sizes, a
+  five-job round-robin batch, and a six-hour transient-failure cooldown.
+- Decision: Ambiguous destinations require manual review. Access-controlled or
+  static pages without one apply destination are retained for the read-only
+  dynamic-rendering milestone. Provider item failures are structured metrics and
+  do not make an otherwise healthy scheduler run fail.
+- Consequence: Schema v4 stores resolution attempt state and sanitized outcomes.
+  Official links retain the original discovery URL and resolver provenance.

@@ -79,6 +79,10 @@ def job_link_role(source: object, url: object) -> str:
         hostname, DISCOVERY_DOMAINS
     ):
         return "official"
+    if normalized_source == "employer_resolver" and not hostname_matches(
+        hostname, DISCOVERY_DOMAINS
+    ):
+        return "official"
     return "discovery"
 
 

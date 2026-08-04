@@ -757,7 +757,7 @@ def test_schema_three_backfills_source_records(tmp_path: Path) -> None:
     storage = JobStorage(database_path)
     saved = storage.list_jobs()[0]
 
-    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 3
+    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 4
     assert saved["enrichment_status"] == "enriched"
     assert len(storage.list_job_source_records(saved["id"])) == 1
 

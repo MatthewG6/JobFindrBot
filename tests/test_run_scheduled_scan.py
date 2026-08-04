@@ -65,6 +65,13 @@ def resolver_summary(errors: list | None = None) -> dict:
         "jobs_already_resolved": 3,
         "jobs_pending": 1,
         "jobs_manual_required": 0,
+        "provider_jobs_attempted": 0,
+        "provider_jobs_resolved": 0,
+        "provider_jobs_deferred": 0,
+        "provider_jobs_dynamic_required": 0,
+        "provider_jobs_ambiguous": 0,
+        "provider_jobs_manual_required": 0,
+        "provider_jobs_failed": 0,
         "errors": errors or [],
     }
 

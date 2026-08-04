@@ -18,7 +18,7 @@ DEFAULT_PLIST_PATH = (
 )
 SCAN_INTERVAL_SECONDS = 30 * 60
 HEALTH_PATH = PROJECT_ROOT / "data" / "scheduler_health.json"
-HEALTH_TIMEOUT_SECONDS = 30
+HEALTH_TIMEOUT_SECONDS = 90
 
 
 def launchd_configuration(

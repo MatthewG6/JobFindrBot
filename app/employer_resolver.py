@@ -1,6 +1,17 @@
+from datetime import UTC, datetime, timedelta
 import re
+import socket
+from typing import Callable
+from urllib.parse import urljoin, urlsplit
 
-from app.job_links import job_link_role, validate_manual_application_url
+from bs4 import BeautifulSoup
+
+from app.job_links import (
+    hostname_matches,
+    job_link_role,
+    public_https_url,
+    validate_manual_application_url,
+)
 from app.storage import JobStorage
 
 
@@ -12,6 +23,18 @@ LOCATION_ALIASES = {
     "us": "united states",
     "usa": "united states",
 }
+PROVIDER_DESTINATION_DOMAINS = {
+    "adzuna": ("adzuna.com",),
+    "himalayas": ("himalayas.app",),
+    "remotive": ("remotive.com",),
+}
+PROVIDER_APPLY_LABELS = {
+    "himalayas": frozenset({"apply", "apply for this job", "apply now"}),
+    "remotive": frozenset({"apply for this position"}),
+}
+PROVIDER_RETRY_INTERVAL = timedelta(hours=6)
+PROVIDER_REQUEST_TIMEOUT = 5
+DEFAULT_PROVIDER_BATCH_LIMIT = 5
 
 
 def normalized_words(value: object) -> list[str]:
@@ -50,6 +73,172 @@ def postings_match(first: dict, second: dict) -> bool:
         == normalize_title(second.get("title"))
         and locations_compatible(first.get("location"), second.get("location"))
     )
+
+
+def provider_or_official_url(source: str, value: object) -> str:
+    url = public_https_url(value)
+    if url is None:
+        raise ValueError("Provider destination must be a public HTTPS URL")
+    hostname = (urlsplit(url).hostname or "").lower().rstrip(".")
+    domains = PROVIDER_DESTINATION_DOMAINS.get(source)
+    if domains is None:
+        raise ValueError("Provider destination source is unsupported")
+    if hostname_matches(hostname, domains):
+        return url
+    return validate_manual_application_url(url)
+
+
+def provider_apply_urls(source: str, html: str, source_url: str) -> set[str]:
+    labels = PROVIDER_APPLY_LABELS.get(source, frozenset())
+    if not labels:
+        return set()
+    candidates = set()
+    soup = BeautifulSoup(html, "html.parser")
+    for link in soup.find_all("a", href=True):
+        label = " ".join(link.get_text(" ", strip=True).casefold().split())
+        if label not in labels:
+            continue
+        try:
+            candidates.add(
+                validate_manual_application_url(
+                    urljoin(source_url, str(link["href"]).strip())
+                )
+            )
+        except ValueError:
+            continue
+    return candidates
+
+
+def provider_resolution_due(job: dict, now: datetime) -> bool:
+    if job.get("resolution_error_type") == "DynamicPageRequired":
+        return False
+    value = job.get("resolution_next_attempt_at")
+    if not isinstance(value, str):
+        return True
+    try:
+        next_attempt = datetime.fromisoformat(value)
+    except ValueError:
+        return True
+    if next_attempt.tzinfo is None:
+        return True
+    return now >= next_attempt.astimezone(UTC)
+
+
+def provider_attempt_ids(
+    jobs: list[dict],
+    now: datetime,
+    limit: int,
+) -> list[int]:
+    queues = {
+        source: [
+            job["id"]
+            for job in jobs
+            if job.get("source") == source
+            and job.get("resolution_status") == "pending"
+            and provider_resolution_due(job, now)
+        ]
+        for source in PROVIDER_DESTINATION_DOMAINS
+    }
+    selected = []
+    offset = 0
+    while len(selected) < limit:
+        added = False
+        for source in PROVIDER_DESTINATION_DOMAINS:
+            queue = queues[source]
+            if offset < len(queue):
+                selected.append(queue[offset])
+                added = True
+                if len(selected) == limit:
+                    break
+        if not added:
+            break
+        offset += 1
+    return selected
+
+
+def resolve_provider_destination(
+    job: dict,
+    *,
+    get: Callable | None,
+    dns_resolver: Callable,
+) -> dict[str, object]:
+    source = str(job.get("source") or "").strip().lower()
+    url = job.get("url")
+    if source not in PROVIDER_DESTINATION_DOMAINS:
+        return {"outcome": "unsupported"}
+
+    from app.job_enrichment import (
+        EnrichmentHTTPStatusError,
+        EnrichmentRequestError,
+        EnrichmentTerminalRequestError,
+        request_static_html,
+        validate_public_dns,
+    )
+
+    try:
+        html, final_url = request_static_html(
+            str(url or ""),
+            timeout=PROVIDER_REQUEST_TIMEOUT,
+            get=get,
+            resolver=dns_resolver,
+            url_validator=lambda value: provider_or_official_url(source, value),
+        )
+    except EnrichmentTerminalRequestError as error:
+        return {
+            "outcome": "manual_required",
+            "error_type": type(error).__name__,
+        }
+    except EnrichmentHTTPStatusError as error:
+        if error.status_code in {401, 403}:
+            return {
+                "outcome": "dynamic_required",
+                "error_type": "DynamicPageRequired",
+            }
+        return {"outcome": "failed", "error_type": type(error).__name__}
+    except EnrichmentRequestError as error:
+        return {"outcome": "failed", "error_type": type(error).__name__}
+    except ValueError:
+        return {"outcome": "manual_required", "error_type": "InvalidRedirect"}
+
+    try:
+        official_url = validate_manual_application_url(final_url)
+    except ValueError:
+        official_url = None
+    if official_url is not None:
+        return {
+            "outcome": "resolved",
+            "url": official_url,
+            "method": "provider_redirect",
+            "confidence": 0.95,
+        }
+
+    candidates = {
+        candidate
+        for candidate in provider_apply_urls(source, html, final_url)
+        if _has_public_dns(candidate, dns_resolver, validate_public_dns)
+    }
+    if len(candidates) == 1:
+        return {
+            "outcome": "resolved",
+            "url": next(iter(candidates)),
+            "method": "provider_apply_link",
+            "confidence": 0.9,
+        }
+    if len(candidates) > 1:
+        return {"outcome": "ambiguous", "error_type": "AmbiguousApplyLink"}
+    return {"outcome": "dynamic_required", "error_type": "DynamicPageRequired"}
+
+
+def _has_public_dns(
+    url: str,
+    dns_resolver: Callable,
+    validator: Callable,
+) -> bool:
+    try:
+        validator(url, dns_resolver)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return True
 
 
 def official_urls_by_job(
@@ -92,8 +281,29 @@ def ensure_job_link_provenance(storage: JobStorage, jobs: list[dict]) -> None:
         )
 
 
-def resolve_employer_sites(storage: JobStorage) -> dict:
+def resolve_employer_sites(
+    storage: JobStorage,
+    *,
+    destination_get: Callable | None = None,
+    dns_resolver: Callable = socket.getaddrinfo,
+    now: datetime | None = None,
+    provider_batch_limit: int = DEFAULT_PROVIDER_BATCH_LIMIT,
+) -> dict:
+    if provider_batch_limit < 0:
+        raise ValueError("Provider resolution batch limit cannot be negative")
+    now = now or datetime.now(UTC)
     jobs = storage.list_jobs()
+    provider_attempt_order = provider_attempt_ids(
+        jobs,
+        now,
+        provider_batch_limit,
+    )
+    provider_jobs_selected = set(provider_attempt_order)
+    jobs_by_id = {job["id"]: job for job in jobs}
+    selected_jobs = [jobs_by_id[job_id] for job_id in provider_attempt_order]
+    processing_jobs = selected_jobs + [
+        job for job in jobs if job["id"] not in provider_jobs_selected
+    ]
     ensure_job_link_provenance(storage, jobs)
     official_urls, link_errors = official_urls_by_job(storage)
     official_jobs = [job for job in jobs if official_urls.get(job["id"])]
@@ -103,10 +313,17 @@ def resolve_employer_sites(storage: JobStorage) -> dict:
         "jobs_already_resolved": 0,
         "jobs_pending": 0,
         "jobs_manual_required": 0,
+        "provider_jobs_attempted": 0,
+        "provider_jobs_resolved": 0,
+        "provider_jobs_deferred": 0,
+        "provider_jobs_dynamic_required": 0,
+        "provider_jobs_ambiguous": 0,
+        "provider_jobs_manual_required": 0,
+        "provider_jobs_failed": 0,
         "errors": link_errors,
     }
 
-    for job in jobs:
+    for job in processing_jobs:
         if job.get("resolution_status") == "resolved" and job.get(
             "application_url"
         ):
@@ -180,6 +397,88 @@ def resolve_employer_sites(storage: JobStorage) -> dict:
             )
             summary["jobs_manual_required"] += 1
         else:
+            source = str(job.get("source") or "").strip().lower()
+            if (
+                source in PROVIDER_DESTINATION_DOMAINS
+                and job.get("resolution_status") != "manual_required"
+            ):
+                if job["id"] not in provider_jobs_selected:
+                    summary["provider_jobs_deferred"] += 1
+                    summary["jobs_pending"] += 1
+                    continue
+                result = resolve_provider_destination(
+                    job,
+                    get=destination_get,
+                    dns_resolver=dns_resolver,
+                )
+                summary["provider_jobs_attempted"] += 1
+                outcome = result["outcome"]
+                error_type = result.get("error_type")
+                next_attempt_at = (
+                    now + PROVIDER_RETRY_INTERVAL
+                    if outcome == "failed"
+                    else None
+                )
+                storage.record_job_resolution_attempt(
+                    job["id"],
+                    attempted_at=now,
+                    next_attempt_at=next_attempt_at,
+                    error_type=(str(error_type) if error_type else None),
+                )
+                if outcome == "resolved":
+                    resolved_url = str(result["url"])
+                    with storage.transaction():
+                        storage.add_job_link(
+                            job["id"],
+                            url=resolved_url,
+                            source="employer_resolver",
+                            source_job_id=job.get("source_job_id"),
+                            role="official",
+                        )
+                        storage.update_job_resolution(
+                            job["id"],
+                            status="resolved",
+                            application_url=resolved_url,
+                            method=str(result["method"]),
+                            confidence=float(result["confidence"]),
+                        )
+                    official_urls.setdefault(job["id"], set()).add(resolved_url)
+                    official_jobs.append(job)
+                    summary["jobs_resolved"] += 1
+                    summary["provider_jobs_resolved"] += 1
+                    continue
+                if outcome in {"ambiguous", "manual_required"}:
+                    storage.update_job_resolution(
+                        job["id"],
+                        status="manual_required",
+                        application_url=None,
+                        method=(
+                            "ambiguous_provider_apply_link"
+                            if outcome == "ambiguous"
+                            else "provider_destination_unavailable"
+                        ),
+                        confidence=None,
+                    )
+                    summary["jobs_manual_required"] += 1
+                    if outcome == "ambiguous":
+                        summary["provider_jobs_ambiguous"] += 1
+                    else:
+                        summary["provider_jobs_manual_required"] += 1
+                    continue
+                if outcome == "dynamic_required":
+                    storage.update_job_resolution(
+                        job["id"],
+                        status="pending",
+                        application_url=None,
+                        method="provider_dynamic_required",
+                        confidence=None,
+                    )
+                    summary["provider_jobs_dynamic_required"] += 1
+                    summary["jobs_pending"] += 1
+                    continue
+                summary["provider_jobs_failed"] += 1
+                summary["jobs_pending"] += 1
+                continue
             if job.get("resolution_status") == "manual_required":
                 summary["jobs_manual_required"] += 1
             else:

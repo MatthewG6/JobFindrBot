@@ -34,6 +34,13 @@ def test_scheduler_metric_is_structured_and_sanitized() -> None:
             "jobs_already_resolved": 2,
             "jobs_pending": 2,
             "jobs_manual_required": 1,
+            "provider_jobs_attempted": 2,
+            "provider_jobs_resolved": 1,
+            "provider_jobs_deferred": 3,
+            "provider_jobs_dynamic_required": 1,
+            "provider_jobs_ambiguous": 0,
+            "provider_jobs_manual_required": 0,
+            "provider_jobs_failed": 0,
             "errors": [],
         },
         "enrichment": {
@@ -65,6 +72,8 @@ def test_scheduler_metric_is_structured_and_sanitized() -> None:
     assert metric["success"] is True
     assert metric["sources"]["remotive"]["jobs_created"] == 3
     assert metric["resolver"]["jobs_resolved"] == 1
+    assert metric["resolver"]["provider_jobs_attempted"] == 2
+    assert metric["resolver"]["provider_jobs_dynamic_required"] == 1
     assert metric["enrichment"]["jobs_enriched"] == 1
     assert metric["enrichment"]["jobs_already_enriched"] == 5
     assert "summary" not in metric["sources"]["remotive"]

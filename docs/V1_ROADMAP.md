@@ -21,7 +21,7 @@ submitting anything without explicit approval.
 
 - [x] Distinguish discovery URLs from official application URLs
 - [x] Match email jobs to existing official employer-board records
-- [ ] Resolve official employer or ATS postings without automating LinkedIn or Indeed
+- [x] Resolve official employer or ATS postings without automating LinkedIn or Indeed
 - [x] Validate redirects, public destinations, provenance, and confidence
 - [x] Enrich jobs through ATS APIs or static employer pages
 - [ ] Add read-only Playwright rendering for approved dynamic employer pages
@@ -68,18 +68,17 @@ submitting anything without explicit approval.
 
 ## Ordered Backlog
 
-1. Expand official employer and ATS destination resolution
-2. Add read-only dynamic employer-page rendering
-3. Build Scoring V2 dimensions, confidence, evidence, and version migration
-4. Build the labeling workflow and held-out scoring benchmark
-5. Add the focused local review and labeling dashboard
-6. Implement D015, including key recovery, backup purge, and its sensitive-data
+1. Add read-only dynamic employer-page rendering
+2. Build Scoring V2 dimensions, confidence, evidence, and version migration
+3. Build the labeling workflow and held-out scoring benchmark
+4. Add the focused local review and labeling dashboard
+5. Implement D015, including key recovery, backup purge, and its sensitive-data
    restore drill
-7. Add the private application profile and approved document catalog
-8. Add structured answer memory, Discord non-sensitive question approvals, and
+6. Add the private application profile and approved document catalog
+7. Add structured answer memory, Discord non-sensitive question approvals, and
    owner-only local sensitive input
-9. Add approved ATS form-assistance adapters and final review package
-10. Rehearse restore, complete release QA, and publish V1 documentation
+8. Add approved ATS form-assistance adapters and final review package
+9. Rehearse restore, complete release QA, and publish V1 documentation
 
 ## Later Versions
 

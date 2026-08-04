@@ -223,6 +223,13 @@ def validate_resolver_summary(summary: object) -> dict:
         "jobs_already_resolved",
         "jobs_pending",
         "jobs_manual_required",
+        "provider_jobs_attempted",
+        "provider_jobs_resolved",
+        "provider_jobs_deferred",
+        "provider_jobs_dynamic_required",
+        "provider_jobs_ambiguous",
+        "provider_jobs_manual_required",
+        "provider_jobs_failed",
     ):
         required_nonnegative_int(summary, key)
     outcomes = (
@@ -232,6 +239,15 @@ def validate_resolver_summary(summary: object) -> dict:
     )
     if outcomes != summary["jobs_considered"]:
         raise ValueError("Resolver summary counts do not balance")
+    provider_outcomes = (
+        summary["provider_jobs_resolved"]
+        + summary["provider_jobs_dynamic_required"]
+        + summary["provider_jobs_ambiguous"]
+        + summary["provider_jobs_manual_required"]
+        + summary["provider_jobs_failed"]
+    )
+    if provider_outcomes != summary["provider_jobs_attempted"]:
+        raise ValueError("Provider resolver summary counts do not balance")
     return summary
 
 
@@ -506,6 +522,10 @@ def print_summary(summary: dict) -> None:
             f"resolved={resolver['jobs_resolved']} "
             f"pending={resolver['jobs_pending']} "
             f"manual={resolver['jobs_manual_required']} "
+            f"provider_attempted={resolver['provider_jobs_attempted']} "
+            f"provider_resolved={resolver['provider_jobs_resolved']} "
+            f"provider_deferred={resolver['provider_jobs_deferred']} "
+            f"provider_dynamic={resolver['provider_jobs_dynamic_required']} "
             f"errors={len(resolver['errors'])}"
         )
 

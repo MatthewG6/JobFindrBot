@@ -39,6 +39,12 @@ class EnrichmentRequestError(EnrichmentError):
     pass
 
 
+class EnrichmentHTTPStatusError(EnrichmentRequestError):
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        super().__init__(f"Static page returned HTTP {status_code}")
+
+
 class EnrichmentPayloadError(EnrichmentError):
     pass
 
@@ -466,8 +472,9 @@ def request_static_html(
     timeout: int = 20,
     get: Callable | None = None,
     resolver: Callable = socket.getaddrinfo,
+    url_validator: Callable[[object], str] = validate_manual_application_url,
 ) -> tuple[str, str]:
-    current_url = validate_manual_application_url(url)
+    current_url = url_validator(url)
     for redirect_count in range(MAX_REDIRECTS + 1):
         addresses = validate_public_dns(current_url, resolver)
         response = None
@@ -491,14 +498,14 @@ def request_static_html(
                 location = response.headers.get("Location")
                 if not location or redirect_count >= MAX_REDIRECTS:
                     raise EnrichmentRequestError("Static page redirect is invalid")
-                current_url = validate_manual_application_url(
-                    urljoin(current_url, location)
-                )
+                current_url = url_validator(urljoin(current_url, location))
                 continue
             if status_code in {404, 410}:
                 raise EnrichmentTerminalRequestError(
                     f"Static page returned HTTP {status_code}"
                 )
+            if status_code >= 400:
+                raise EnrichmentHTTPStatusError(status_code)
             response.raise_for_status()
             content_type = response.headers.get("Content-Type", "")
             if content_type.split(";", 1)[0].strip().lower() not in {
@@ -526,7 +533,7 @@ def request_static_html(
             return html, current_url
         except EnrichmentError:
             raise
-        except requests.RequestException as error:
+        except (requests.RequestException, Urllib3HTTPError) as error:
             raise EnrichmentRequestError(
                 f"Static page request failed ({type(error).__name__})"
             ) from None
