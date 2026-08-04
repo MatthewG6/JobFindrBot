@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.gmail_client import DEFAULT_GMAIL_DB_PATH, GmailJobAlertClient
 from app.employer_resolver import resolve_employer_sites
+from app.job_enrichment import enrich_resolved_jobs
 from app.operational_metrics import append_scheduler_metric, scheduler_metric
 from app.discord_notifications import (
     DiscordNotConfigured,
@@ -45,6 +46,7 @@ SOURCE_INTERVALS = {
 SourceRunner = Callable[[JobStorage], dict]
 NotificationRunner = Callable[[JobStorage], dict]
 ResolverRunner = Callable[[JobStorage], dict]
+EnrichmentRunner = Callable[[JobStorage], dict]
 
 
 def default_source_runners() -> dict[str, SourceRunner]:
@@ -233,6 +235,39 @@ def validate_resolver_summary(summary: object) -> dict:
     return summary
 
 
+def validate_enrichment_summary(summary: object) -> dict:
+    if not isinstance(summary, dict) or not isinstance(summary.get("errors"), list):
+        raise ValueError("Enrichment returned an invalid summary")
+    for key in (
+        "jobs_eligible",
+        "jobs_attempted",
+        "jobs_enriched",
+        "jobs_already_enriched",
+        "jobs_deferred",
+        "jobs_dynamic_required",
+        "jobs_already_dynamic_required",
+        "jobs_manual_required",
+        "jobs_already_manual_required",
+        "jobs_failed",
+    ):
+        required_nonnegative_int(summary, key)
+    if summary["jobs_attempted"] + summary["jobs_deferred"] != summary[
+        "jobs_eligible"
+    ]:
+        raise ValueError("Enrichment summary counts do not balance")
+    attempted_outcomes = (
+        summary["jobs_enriched"]
+        + summary["jobs_dynamic_required"]
+        + summary["jobs_manual_required"]
+        + summary["jobs_failed"]
+    )
+    if attempted_outcomes != summary["jobs_attempted"]:
+        raise ValueError("Enrichment attempt counts do not balance")
+    if len(summary["errors"]) != summary["jobs_failed"]:
+        raise ValueError("Enrichment error counts do not balance")
+    return summary
+
+
 def default_gmail_runner(storage: JobStorage) -> dict:
     client = GmailJobAlertClient.from_local_oauth(allow_interactive=False)
     return run_gmail_scan(storage=storage, client=client)
@@ -246,6 +281,10 @@ def default_resolver_runner(storage: JobStorage) -> dict:
     return resolve_employer_sites(storage)
 
 
+def default_enrichment_runner(storage: JobStorage) -> dict:
+    return enrich_resolved_jobs(storage)
+
+
 def run_scheduled_scan(
     *,
     storage: JobStorage | None = None,
@@ -255,6 +294,7 @@ def run_scheduled_scan(
     source_runners: Mapping[str, SourceRunner] | None = None,
     himalayas_runner: SourceRunner | None = None,
     resolver_runner: ResolverRunner | None = default_resolver_runner,
+    enrichment_runner: EnrichmentRunner | None = default_enrichment_runner,
     notification_runner: NotificationRunner | None = None,
 ) -> dict:
     storage = storage or JobStorage(DEFAULT_GMAIL_DB_PATH)
@@ -286,6 +326,7 @@ def run_scheduled_scan(
         "gmail": None,
         "sources": {},
         "resolver": None,
+        "enrichment": None,
         "discord": None,
         "errors": errors,
     }
@@ -383,6 +424,25 @@ def run_scheduled_scan(
                 {"source": "resolver", "error_type": type(error).__name__}
             )
 
+    if enrichment_runner is not None:
+        try:
+            enrichment_summary = validate_enrichment_summary(
+                enrichment_runner(storage)
+            )
+            summary["enrichment"] = enrichment_summary
+            if enrichment_summary["errors"]:
+                errors.append(
+                    {
+                        "source": "enrichment",
+                        "error_type": "EnrichmentItemErrors",
+                    }
+                )
+        except Exception as error:
+            summary["enrichment"] = {"status": "failed"}
+            errors.append(
+                {"source": "enrichment", "error_type": type(error).__name__}
+            )
+
     if notification_runner is not None:
         try:
             discord_summary = validate_notification_summary(
@@ -447,6 +507,24 @@ def print_summary(summary: dict) -> None:
             f"pending={resolver['jobs_pending']} "
             f"manual={resolver['jobs_manual_required']} "
             f"errors={len(resolver['errors'])}"
+        )
+
+    enrichment = summary.get("enrichment")
+    if enrichment is None:
+        print("enrichment: disabled")
+    elif enrichment == {"status": "failed"}:
+        print("enrichment: failed")
+    else:
+        print(
+            "enrichment: "
+            f"eligible={enrichment['jobs_eligible']} "
+            f"attempted={enrichment['jobs_attempted']} "
+            f"enriched={enrichment['jobs_enriched']} "
+            f"dynamic={enrichment['jobs_dynamic_required']} "
+            f"already_dynamic={enrichment['jobs_already_dynamic_required']} "
+            f"manual={enrichment['jobs_manual_required']} "
+            f"failed={enrichment['jobs_failed']} "
+            f"errors={len(enrichment['errors'])}"
         )
 
     discord = summary.get("discord")
@@ -540,6 +618,7 @@ def main() -> None:
                 "gmail": None,
                 "sources": {},
                 "resolver": None,
+                "enrichment": None,
                 "discord": None,
                 "errors": [
                     {

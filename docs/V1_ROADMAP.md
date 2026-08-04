@@ -22,8 +22,8 @@ submitting anything without explicit approval.
 - [x] Distinguish discovery URLs from official application URLs
 - [x] Match email jobs to existing official employer-board records
 - [ ] Resolve official employer or ATS postings without automating LinkedIn or Indeed
-- [ ] Validate redirects, public destinations, provenance, and confidence
-- [ ] Enrich jobs through ATS APIs or static employer pages
+- [x] Validate redirects, public destinations, provenance, and confidence
+- [x] Enrich jobs through ATS APIs or static employer pages
 - [ ] Add read-only Playwright rendering for approved dynamic employer pages
 - [x] Provide a manual URL handoff when automatic resolution is not possible
 

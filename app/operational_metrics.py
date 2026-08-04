@@ -41,6 +41,7 @@ def scheduler_metric(
     gmail = summary.get("gmail")
     discord = summary.get("discord")
     resolver = summary.get("resolver")
+    enrichment = summary.get("enrichment")
     sources = {}
     for name, result in summary.get("sources", {}).items():
         source_summary = result.get("summary") or {}
@@ -84,6 +85,38 @@ def scheduler_metric(
                     0,
                 ),
                 "error_count": len(resolver.get("errors", [])),
+            }
+        ),
+        "enrichment": (
+            None
+            if enrichment is None or enrichment.get("status") == "failed"
+            else {
+                "jobs_eligible": enrichment.get("jobs_eligible", 0),
+                "jobs_attempted": enrichment.get("jobs_attempted", 0),
+                "jobs_enriched": enrichment.get("jobs_enriched", 0),
+                "jobs_already_enriched": enrichment.get(
+                    "jobs_already_enriched",
+                    0,
+                ),
+                "jobs_deferred": enrichment.get("jobs_deferred", 0),
+                "jobs_dynamic_required": enrichment.get(
+                    "jobs_dynamic_required",
+                    0,
+                ),
+                "jobs_already_dynamic_required": enrichment.get(
+                    "jobs_already_dynamic_required",
+                    0,
+                ),
+                "jobs_manual_required": enrichment.get(
+                    "jobs_manual_required",
+                    0,
+                ),
+                "jobs_already_manual_required": enrichment.get(
+                    "jobs_already_manual_required",
+                    0,
+                ),
+                "jobs_failed": enrichment.get("jobs_failed", 0),
+                "error_count": len(enrichment.get("errors", [])),
             }
         ),
         "discord": (

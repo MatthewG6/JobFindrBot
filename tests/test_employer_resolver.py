@@ -170,6 +170,7 @@ def test_manual_handoff_rejects_provider_and_private_urls(
 
     assert resolved["resolution_status"] == "resolved"
     assert resolved["resolution_method"] == "manual_handoff"
+    assert resolved["enrichment_status"] == "pending"
 
 
 def test_schema_two_migrates_existing_jobs_and_links(tmp_path: Path) -> None:
@@ -192,7 +193,7 @@ def test_schema_two_migrates_existing_jobs_and_links(tmp_path: Path) -> None:
     storage = JobStorage(database_path)
     job = storage.list_jobs()[0]
 
-    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 2
+    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 3
     assert job["resolution_status"] == "resolved"
     assert job["application_url"] == job["url"]
     assert storage.list_job_links(job["id"])[0]["role"] == "official"

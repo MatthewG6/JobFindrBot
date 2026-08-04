@@ -358,6 +358,50 @@ def test_complete_linkedin_email_accepts_provider_count_mismatch(
     assert result["parsed_count"] == 2
 
 
+def test_complete_linkedin_digest_accepts_alert_heading_without_count(
+    tmp_path: Path,
+) -> None:
+    body = LINKEDIN_FIXTURE.read_text(encoding="utf-8").replace(
+        "2 new jobs match your preferences.\n",
+        "",
+    )
+    message = linkedin_email().model_copy(
+        update={
+            "message_id": "fake-linkedin-heading-without-count",
+            "text_body": body,
+        }
+    )
+
+    result = ingest_job_alert_email(
+        message,
+        JobStorage(tmp_path / "jobs.json"),
+    )
+
+    assert result["processed"] is True
+    assert result["parsed_count"] == 2
+
+
+def test_linkedin_heading_and_footer_without_cards_is_retryable(
+    tmp_path: Path,
+) -> None:
+    message = linkedin_email().model_copy(
+        update={
+            "message_id": "fake-linkedin-heading-footer-no-cards",
+            "text_body": (
+                "Your job alert for software engineer in Minnesota\n"
+                "See all jobs on LinkedIn: "
+                "https://www.linkedin.com/jobs/search-results/\n"
+            ),
+        }
+    )
+    storage = JobStorage(tmp_path / "jobs.json")
+
+    with pytest.raises(JobAlertParseError, match="no recognized job count"):
+        ingest_job_alert_email(message, storage)
+
+    assert storage.list_processed_emails() == []
+
+
 def test_linkedin_footer_without_recognized_heading_is_retryable(
     tmp_path: Path,
 ) -> None:

@@ -197,11 +197,12 @@ def test_job_payload_prefers_resolved_application_url() -> None:
             "fit_score": 50,
             "url": "https://www.linkedin.com/jobs/view/123",
             "application_url": "https://careers.example.com/jobs/456",
+            "apply_url": "https://careers.example.com/jobs/456/apply",
         }
     )
 
     assert payload["embeds"][0]["url"] == (
-        "https://careers.example.com/jobs/456"
+        "https://careers.example.com/jobs/456/apply"
     )
 
 

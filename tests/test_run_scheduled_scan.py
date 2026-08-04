@@ -69,6 +69,22 @@ def resolver_summary(errors: list | None = None) -> dict:
     }
 
 
+def enrichment_summary(errors: list | None = None) -> dict:
+    return {
+        "jobs_eligible": 2,
+        "jobs_attempted": 2,
+        "jobs_enriched": 1,
+        "jobs_already_enriched": 3,
+        "jobs_deferred": 0,
+        "jobs_dynamic_required": 1,
+        "jobs_already_dynamic_required": 0,
+        "jobs_manual_required": 0,
+        "jobs_already_manual_required": 0,
+        "jobs_failed": 0,
+        "errors": errors or [],
+    }
+
+
 def test_first_scheduled_run_scans_all_configured_sources(
     tmp_path: Path,
 ) -> None:
@@ -172,11 +188,19 @@ def test_discord_runs_after_job_sources(tmp_path: Path) -> None:
         },
         resolver_runner=lambda storage: calls.append("resolver")
         or resolver_summary(),
+        enrichment_runner=lambda storage: calls.append("enrichment")
+        or enrichment_summary(),
         notification_runner=lambda storage: calls.append("discord")
         or notification_summary(),
     )
 
-    assert calls == ["gmail", "remotive", "resolver", "discord"]
+    assert calls == [
+        "gmail",
+        "remotive",
+        "resolver",
+        "enrichment",
+        "discord",
+    ]
     assert summary["discord"]["status"] == "ok"
     assert summary["errors"] == []
 
@@ -203,6 +227,32 @@ def test_resolver_failure_is_isolated_before_discord(tmp_path: Path) -> None:
     assert summary["resolver"] == {"status": "failed"}
     assert summary["errors"] == [
         {"source": "resolver", "error_type": "RuntimeError"}
+    ]
+
+
+def test_enrichment_failure_is_isolated_before_discord(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def fail_enrichment(storage: JobStorage) -> dict:
+        calls.append("enrichment")
+        raise RuntimeError("private enrichment detail")
+
+    summary = run_scheduled_scan(
+        storage=JobStorage(tmp_path / "jobs.json"),
+        state_path=tmp_path / "state.json",
+        now=NOW,
+        gmail_runner=lambda storage: gmail_summary(),
+        source_runners={},
+        resolver_runner=lambda storage: resolver_summary(),
+        enrichment_runner=fail_enrichment,
+        notification_runner=lambda storage: calls.append("discord")
+        or notification_summary(),
+    )
+
+    assert calls == ["enrichment", "discord"]
+    assert summary["enrichment"] == {"status": "failed"}
+    assert summary["errors"] == [
+        {"source": "enrichment", "error_type": "RuntimeError"}
     ]
 
 

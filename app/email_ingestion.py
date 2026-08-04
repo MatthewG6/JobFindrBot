@@ -403,7 +403,11 @@ def validate_parsed_job_count(
         if (
             expected_count is None
             and has_end_marker
-            and linkedin_is_confirmation(text)
+            and visible_count > 0
+            and (
+                linkedin_is_confirmation(text)
+                or linkedin_alert_query(text) is not None
+            )
         ):
             expected_count = visible_count
         elif (

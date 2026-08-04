@@ -4,6 +4,8 @@ pydantic
 tinydb
 pyyaml
 requests
+urllib3
+certifi
 beautifulsoup4
 google-api-python-client
 google-auth-httplib2

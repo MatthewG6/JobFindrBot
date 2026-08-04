@@ -28,7 +28,8 @@ from app.models import (
 
 
 DEFAULT_DB_PATH = Path("data/jobs.json")
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
+MIN_ENRICHED_DESCRIPTION_CHARS = 20
 DEFAULT_BACKUP_RETENTION = 14
 _DATABASE_LOCKS: dict[Path, "DatabaseLock"] = {}
 _DATABASE_LOCKS_GUARD = Lock()
@@ -174,6 +175,7 @@ class JobStorage:
         )
         self.discord_contexts_table = self.db.table("discord_contexts")
         self.job_links_table = self.db.table("job_links")
+        self.job_source_records_table = self.db.table("job_source_records")
         self.schema_metadata_table = self.db.table("schema_metadata")
 
     def _ensure_schema(self) -> None:
@@ -313,6 +315,37 @@ class JobStorage:
                 resolution = self._resolution_defaults(data, role, now)
                 self.jobs_table.update(resolution, doc_ids=[job.doc_id])
                 self._register_job_link(job.doc_id, data, role=role, now=now)
+            return
+        if version == 3:
+            now = utc_now().isoformat()
+            for job in self.jobs_table.all():
+                data = dict(job)
+                role = job_link_role(data.get("source"), data.get("url"))
+                self._register_source_record(job.doc_id, data, now=now)
+                description = str(data.get("description") or "").strip()
+                enriched = (
+                    role == "official"
+                    and len(description) >= MIN_ENRICHED_DESCRIPTION_CHARS
+                )
+                self.jobs_table.update(
+                    {
+                        "enrichment_status": (
+                            "enriched" if enriched else "pending"
+                        ),
+                        "enrichment_method": (
+                            "source_payload" if enriched else None
+                        ),
+                        "enrichment_source_url": (
+                            data.get("url") if enriched else None
+                        ),
+                        "enrichment_version": 1 if enriched else None,
+                        "enriched_at": now if enriched else None,
+                        "enrichment_last_attempt_at": None,
+                        "enrichment_next_attempt_at": None,
+                        "enrichment_error_type": None,
+                    },
+                    doc_ids=[job.doc_id],
+                )
             return
         raise ValueError(f"Unsupported database migration: {version}")
 
@@ -581,24 +614,35 @@ class JobStorage:
         self,
         job_data: dict | JobPosting,
     ) -> tuple[dict, bool]:
-        with self._access():
-            if isinstance(job_data, JobPosting):
-                job = job_data
-                data = job.model_dump(mode="json")
-                data["content_hash"] = job_content_hash(job)
-            else:
-                data = dict(job_data)
+        if self._lock.transaction_owner is self:
+            return self._save_job_with_status(job_data)
+        with self.transaction():
+            return self._save_job_with_status(job_data)
 
-            existing = self.find_duplicate(data)
-            if existing is not None:
-                self._register_job_link(existing["id"], data)
-                return existing, False
+    def _save_job_with_status(
+        self,
+        job_data: dict | JobPosting,
+    ) -> tuple[dict, bool]:
+        if isinstance(job_data, JobPosting):
+            job = job_data
+            data = job.model_dump(mode="json")
+            data["content_hash"] = job_content_hash(job)
+        else:
+            data = dict(job_data)
 
-            role = job_link_role(data.get("source"), data.get("url"))
-            data.update(self._resolution_defaults(data, role))
-            document_id = self.jobs_table.insert(data)
-            self._register_job_link(document_id, data, role=role)
-            return {**data, "id": document_id}, True
+        existing = self.find_duplicate(data)
+        if existing is not None:
+            self._register_job_link(existing["id"], data)
+            self._register_source_record(existing["id"], data)
+            return existing, False
+
+        role = job_link_role(data.get("source"), data.get("url"))
+        data.update(self._resolution_defaults(data, role))
+        data.update(self._enrichment_defaults(data, role))
+        document_id = self.jobs_table.insert(data)
+        self._register_job_link(document_id, data, role=role)
+        self._register_source_record(document_id, data)
+        return {**data, "id": document_id}, True
 
     def _resolution_defaults(
         self,
@@ -650,6 +694,89 @@ class JobStorage:
             }
         )
 
+    def _enrichment_defaults(self, data: dict, role: str) -> dict:
+        description = str(data.get("description") or "").strip()
+        enriched = (
+            role == "official"
+            and len(description) >= MIN_ENRICHED_DESCRIPTION_CHARS
+        )
+        now = utc_now().isoformat() if enriched else None
+        return {
+            "enrichment_status": "enriched" if enriched else "pending",
+            "enrichment_method": "source_payload" if enriched else None,
+            "enrichment_source_url": data.get("url") if enriched else None,
+            "enrichment_version": 1 if enriched else None,
+            "enriched_at": now,
+            "enrichment_last_attempt_at": None,
+            "enrichment_next_attempt_at": None,
+            "enrichment_error_type": None,
+        }
+
+    def _register_source_record(
+        self,
+        job_id: int,
+        data: dict,
+        *,
+        now: str | None = None,
+    ) -> None:
+        url = data.get("url")
+        if not isinstance(url, str) or not url.strip():
+            return
+        source = str(data.get("source") or "unknown").strip().lower()
+        url = url.strip()
+        records = Query()
+        existing = self.job_source_records_table.get(
+            (records.job_id == job_id)
+            & (records.source == source)
+            & (records.url == url)
+        )
+        posting = {
+            key: data.get(key)
+            for key in (
+                "title",
+                "company",
+                "location",
+                "description",
+                "salary_text",
+                "posted_text",
+                "posted_at",
+                "employment_type",
+                "workplace_type",
+            )
+        }
+        if existing is not None:
+            previous = existing.get("posting")
+            previous = previous if isinstance(previous, dict) else {}
+            posting = {
+                key: (
+                    value
+                    if value is not None and value != ""
+                    else previous.get(key)
+                )
+                for key, value in posting.items()
+            }
+            previous_description = str(previous.get("description") or "").strip()
+            new_description = str(posting.get("description") or "").strip()
+            if len(previous_description) > len(new_description):
+                posting["description"] = previous.get("description")
+        record = {
+            "job_id": job_id,
+            "source": source,
+            "url": url,
+            "source_job_id": data.get("source_job_id") or (
+                existing.get("source_job_id") if existing is not None else None
+            ),
+            "posting": posting,
+            "captured_at": now or utc_now().isoformat(),
+        }
+        if existing is None:
+            self.job_source_records_table.insert(record)
+        else:
+            self.job_source_records_table.update(
+                record,
+                doc_ids=[existing.doc_id],
+            )
+
     def list_jobs(self) -> list[dict]:
         with self._access():
             return [{**job, "id": job.doc_id} for job in self.jobs_table.all()]
@@ -667,6 +794,17 @@ class JobStorage:
                 query = Query()
                 links = self.job_links_table.search(query.job_id == job_id)
             return [{**link, "id": link.doc_id} for link in links]
+
+    def list_job_source_records(self, job_id: int | None = None) -> list[dict]:
+        with self._access():
+            if job_id is None:
+                records = self.job_source_records_table.all()
+            else:
+                query = Query()
+                records = self.job_source_records_table.search(
+                    query.job_id == job_id
+                )
+            return [{**record, "id": record.doc_id} for record in records]
 
     def add_job_link(
         self,
@@ -730,6 +868,38 @@ class JobStorage:
                 ),
             }
             self.jobs_table.update(updates, doc_ids=[job_id])
+            refreshed = self.jobs_table.get(doc_id=job_id)
+            return {**refreshed, "id": refreshed.doc_id}
+
+    def update_job_enrichment(
+        self,
+        job_id: int,
+        updates: dict,
+    ) -> dict:
+        allowed = {
+            "description",
+            "salary_text",
+            "employment_type",
+            "workplace_type",
+            "apply_url",
+            "fit_score",
+            "score_reasons",
+            "red_flags",
+            "enrichment_status",
+            "enrichment_method",
+            "enrichment_source_url",
+            "enrichment_version",
+            "enriched_at",
+            "enrichment_last_attempt_at",
+            "enrichment_next_attempt_at",
+            "enrichment_error_type",
+        }
+        if not updates or set(updates) - allowed:
+            raise ValueError("Job enrichment update contains invalid fields")
+        with self._access():
+            if self.jobs_table.get(doc_id=job_id) is None:
+                raise ValueError("Job does not exist")
+            self.jobs_table.update(dict(updates), doc_ids=[job_id])
             refreshed = self.jobs_table.get(doc_id=job_id)
             return {**refreshed, "id": refreshed.doc_id}
 

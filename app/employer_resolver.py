@@ -202,10 +202,23 @@ def set_manual_application_url(
             source="manual",
             role="official",
         )
-        return storage.update_job_resolution(
+        storage.update_job_resolution(
             job_id,
             status="resolved",
             application_url=url,
             method="manual_handoff",
             confidence=1.0,
+        )
+        return storage.update_job_enrichment(
+            job_id,
+            {
+                "enrichment_status": "pending",
+                "enrichment_method": None,
+                "enrichment_source_url": None,
+                "enrichment_version": None,
+                "enriched_at": None,
+                "enrichment_last_attempt_at": None,
+                "enrichment_next_attempt_at": None,
+                "enrichment_error_type": None,
+            },
         )

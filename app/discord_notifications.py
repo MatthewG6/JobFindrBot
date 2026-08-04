@@ -202,7 +202,11 @@ def job_embed(job: dict) -> dict:
             )
         },
     }
-    url = public_job_url(job.get("application_url") or job.get("url"))
+    url = public_job_url(
+        job.get("apply_url")
+        or job.get("application_url")
+        or job.get("url")
+    )
     if url is not None:
         embed["url"] = url
     salary = discord_text(job.get("salary_text"), 256)

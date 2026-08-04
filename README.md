@@ -75,7 +75,7 @@ Not planned for the early version:
 - Docker
 - PostgreSQL
 - AI-based scoring
-- Browser automation
+- Unsupervised browser automation
 - Auto-apply behavior
 
 ## Current Status
@@ -84,10 +84,13 @@ Jobbot runs locally every 30 minutes. It ingests labeled LinkedIn and Indeed
 alerts from Gmail, scans compliant job APIs and employer boards at provider-safe
 intervals, preserves every source link, resolves high-confidence matches to
 official application URLs, scores jobs, and sends new high-fit results to
-Discord. Application records require separate approval to start and submit.
+Discord. Resolved postings are enriched from captured official payloads,
+Greenhouse and Lever APIs, or static employer-page `JobPosting` JSON-LD before
+they are rescored. Application records require separate approval to start and
+submit.
 
-Full-posting enrichment, Scoring V2, the review dashboard, and approved ATS
-assistance remain V1 work in progress. See the
+Read-only enrichment for JavaScript-only pages, Scoring V2, the review
+dashboard, and approved ATS assistance remain V1 work in progress. See the
 [V1 definition of done](docs/V1_ROADMAP.md) and
 [architecture](docs/ARCHITECTURE.md).
 
@@ -302,7 +305,27 @@ Manual URLs must be public HTTPS destinations and cannot point back to LinkedIn,
 Indeed, or another discovery aggregator. This stage does not visit provider pages
 or launch Playwright.
 
-### 5. Job alert email ingestion foundation
+### 5. Official posting enrichment
+
+After resolution, Jobbot prefers previously captured official-source data,
+then the Greenhouse or Lever posting API, then static `JobPosting` JSON-LD from
+the validated employer URL. The payload must match the saved title and, where
+available, company before Jobbot stores the full description and rescores the
+job. Requests reject private network destinations, revalidate each redirect,
+pin TLS connections to the validated public address, limit response size, and
+never submit an application.
+
+Run one bounded enrichment batch manually:
+
+```bash
+.venv/bin/python scripts/run_job_enrichment.py --max-jobs 10
+```
+
+Pages without one unique static posting are marked `dynamic_required` for the
+future read-only Playwright stage. Invalid or mismatched payloads require manual
+review; only transient request failures retry after 24 hours.
+
+### 6. Job alert email ingestion foundation
 
 The app includes parsers for the plain-text MIME parts of LinkedIn and Indeed
 job-alert emails. Parsed cards are normalized into `JobPosting` records and use
@@ -360,6 +383,8 @@ Every production scheduler run also creates at most one owner-only database back
 per day under `data/backups/`, retains the newest 14 daily backups, and appends a
 sanitized structured health record to `data/metrics/scheduler_runs.jsonl`. TinyDB
 schema metadata is versioned; a separate snapshot is created before migrations.
+Schema v3 also stores per-source posting snapshots so a later official-source
+duplicate can enrich an email-discovered record without another network request.
 
 ## Candidate Profile and Scoring Benchmark
 
@@ -501,6 +526,7 @@ app/
   discord_service.py
   email_ingestion.py
   employer_resolver.py
+  job_enrichment.py
   job_links.py
   job_sources.py
   main.py
@@ -524,6 +550,7 @@ data/
 scripts/
   run_discord_bot.py
   run_employer_resolution.py
+  run_job_enrichment.py
   run_scheduled_scan.py
   run_scoring_benchmark.py
 tests/
