@@ -13,6 +13,7 @@ data/*.lock
 data/backups/
 data/metrics/
 !data/.gitkeep
+data/logs/
 
 .env
 credentials/

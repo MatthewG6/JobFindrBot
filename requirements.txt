@@ -11,3 +11,5 @@ google-auth-oauthlib
 pytest
 httpx2
 discord.py>=2.7,<3
+python-dotenv
+certifi

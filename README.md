@@ -474,9 +474,8 @@ DISCORD_ALLOWED_USER_ID
 ```
 
 The values are documented in `.env.example`. Keep the real token in the
-environment or a local `.env` file; `.env` is ignored by git. The application
-does not automatically load `.env`, so export the variables or use a trusted
-local process manager that loads them.
+environment or a local `.env` file; `.env` is ignored by git. Existing process
+environment values take precedence over `.env`.
 
 Start the bot:
 
@@ -488,6 +487,58 @@ The process validates all required configuration before connecting. It uses no
 privileged Discord gateway intents. Keep `discord.enabled` and
 `discord.application_actions_enabled` set to `false` in `config.yaml` until a
 later milestone explicitly wires runtime orchestration and approval gates.
+
+### Always-On macOS Service
+
+On macOS, install the bot as a per-user LaunchAgent after the virtual
+environment and `.env` are configured:
+
+```bash
+python scripts/manage_discord_service.py install
+```
+
+Run service-management commands as your normal macOS user. Do not use `sudo`;
+the installer intentionally rejects root execution so it cannot target the
+wrong home directory or launchd domain.
+
+The service:
+
+- starts when Matthew logs in;
+- restarts after the process exits;
+- runs from this repository and its `.venv`;
+- loads the ignored local `.env`;
+- uses the trusted `certifi` CA bundle when no CA path is configured;
+- writes standard and error logs under `data/logs/`;
+- stores no Discord token in the LaunchAgent property list.
+
+Check status:
+
+```bash
+python scripts/manage_discord_service.py status
+```
+
+Restart after code or configuration changes:
+
+```bash
+python scripts/manage_discord_service.py restart
+```
+
+Inspect sanitized operational logs:
+
+```bash
+tail -n 100 data/logs/discord-bot.log
+tail -n 100 data/logs/discord-bot.error.log
+```
+
+Stop the service and remove its LaunchAgent:
+
+```bash
+python scripts/manage_discord_service.py uninstall
+```
+
+The installed property list is
+`~/Library/LaunchAgents/com.matthewglassman.jobfindrbot.discord.plist`. Removal
+does not delete `.env`, saved jobs, application records, or logs.
 
 ## Project Structure
 
