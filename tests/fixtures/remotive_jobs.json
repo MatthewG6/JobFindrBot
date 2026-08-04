@@ -1,0 +1,26 @@
+{
+  "jobs": [
+    {
+      "id": 101,
+      "url": "https://remotive.com/remote-jobs/software-dev/junior-software-engineer-101",
+      "title": "Junior Software Engineer",
+      "company_name": "Remote Example",
+      "publication_date": "2026-08-01T12:00:00Z",
+      "candidate_required_location": "United States",
+      "salary": "$70,000 - $90,000",
+      "description": "<p>Build &amp; test <strong>Python</strong> services.</p>"
+    },
+    {
+      "id": 102,
+      "url": "https://evil.example/jobs/102",
+      "title": "Software Engineer",
+      "company_name": "Untrusted Example"
+    },
+    {
+      "id": 103,
+      "url": "https://remotive.com/remote-jobs/software-dev/missing-title-103",
+      "title": "",
+      "company_name": "Incomplete Example"
+    }
+  ]
+}

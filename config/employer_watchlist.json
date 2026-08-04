@@ -1,0 +1,32 @@
+[
+  {
+    "provider": "greenhouse",
+    "site": "gitlab",
+    "company": "GitLab"
+  },
+  {
+    "provider": "greenhouse",
+    "site": "cloudflare",
+    "company": "Cloudflare"
+  },
+  {
+    "provider": "greenhouse",
+    "site": "datadog",
+    "company": "Datadog"
+  },
+  {
+    "provider": "greenhouse",
+    "site": "mongodb",
+    "company": "MongoDB"
+  },
+  {
+    "provider": "lever",
+    "site": "palantir",
+    "company": "Palantir"
+  },
+  {
+    "provider": "lever",
+    "site": "zoox",
+    "company": "Zoox"
+  }
+]

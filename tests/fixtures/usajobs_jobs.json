@@ -1,0 +1,25 @@
+{
+  "SearchResult": {
+    "SearchResultItems": [
+      {
+        "MatchedObjectId": "USA-1",
+        "MatchedObjectDescriptor": {
+          "PositionID": "USA-1",
+          "PositionTitle": "IT Specialist (Application Software)",
+          "OrganizationName": "Department of Example",
+          "PositionLocationDisplay": "Minneapolis, Minnesota",
+          "PositionURI": "https://www.usajobs.gov/job/123456789",
+          "QualificationSummary": "Develop <b>software</b> for public services.",
+          "PublicationStartDate": "2026-08-02T00:00:00Z",
+          "PositionRemuneration": [
+            {
+              "MinimumRange": "65000",
+              "MaximumRange": "90000",
+              "RateIntervalCode": "Per Year"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

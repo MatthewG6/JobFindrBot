@@ -52,9 +52,9 @@ The assistant should avoid or heavily penalize postings that are clearly not a g
 - FastAPI
 - TinyDB for local JSON-like storage
 - Pydantic for data validation
-- BeautifulSoup and requests for simple scraping
+- BeautifulSoup and requests for API response normalization
 - pytest for tests
-- APScheduler or cron for scheduled scans later
+- macOS launchd for scheduled scans
 - Telegram bot or Discord webhook for notifications later
 
 Not planned for the early version:
@@ -62,7 +62,6 @@ Not planned for the early version:
 - React
 - Docker
 - PostgreSQL
-- Playwright
 - AI-based scoring
 - Browser automation
 - Auto-apply behavior
@@ -193,7 +192,7 @@ The HTML fixture scanner parses local sample HTML files from `tests/fixtures/` u
 
 This stage proves the app can parse job-card-style HTML safely. Malformed or incomplete cards are skipped instead of crashing the parser.
 
-### 3. First real scanner
+### 3. Public job APIs
 
 The first real source uses the official [Himalayas public Jobs API](https://himalayas.app/docs/remote-jobs-api). It makes one filtered request for recent entry-level software engineering jobs and sends parsed results through the existing ingestion pipeline.
 
@@ -204,6 +203,50 @@ python scripts/run_himalayas_scan.py
 ```
 
 Himalayas data is refreshed every 24 hours, so this scanner should not run more than once per day. Job links point back to [Himalayas](https://himalayas.app), and the source is stored as `himalayas`.
+
+The app also supports these compliant job sources:
+
+| Source | Authentication | Scheduled interval | Search scope |
+| --- | --- | --- | --- |
+| Remotive | None | 6 hours | Remote software development |
+| Greenhouse employer boards | None | 6 hours | Target titles in US/remote locations |
+| Lever employer boards | None | 6 hours | Target titles in US/remote locations |
+| Adzuna | App ID and key | 6 hours | Recent Minnesota software roles |
+| USAJOBS | API key and registration email | 6 hours | Recent Minnesota public/graduate roles |
+
+Remotive results retain their Remotive links and source attribution. Employer
+boards are configured in `config/employer_watchlist.json`; only public
+Greenhouse and Lever job-board APIs are used. The adapters do not scrape
+LinkedIn or Indeed pages.
+
+Run the public sources manually:
+
+```bash
+python scripts/run_remotive_scan.py
+python scripts/run_employer_watchlist_scan.py
+```
+
+Adzuna and USAJOBS remain safely disabled until credentials are configured.
+Create `credentials/source_api.json` from
+`config/source_credentials.example.json`, fill in the values, and keep the file
+local. Jobbot repairs the directory to mode `0700` and the file to `0600` before
+reading it. This private JSON file is required for scheduled launchd scans.
+Environment variables are supported only for manual terminal runs because
+launchd does not inherit shell environment variables:
+
+```text
+ADZUNA_APP_ID
+ADZUNA_APP_KEY
+USAJOBS_API_KEY
+USAJOBS_USER_AGENT
+```
+
+Then verify each credentialed source manually:
+
+```bash
+python scripts/run_adzuna_scan.py
+python scripts/run_usajobs_scan.py
+```
 
 Any real scanner must respect site terms, avoid aggressive scraping, never perform auto-apply behavior, and still send parsed jobs through the existing ingestion pipeline.
 
@@ -237,8 +280,13 @@ pipeline without changing Gmail.
 ## Scheduled Scans
 
 The macOS launchd scheduler starts on login and wakes every 30 minutes. LinkedIn
-and Indeed alert emails are checked every cycle. Himalayas is checked by the same
-runner only when its 24-hour source interval is due.
+and Indeed alert emails are checked every cycle. The same process runs each API
+only when its provider-specific interval is due: Himalayas every 24 hours and
+Remotive, employer watchlists, Adzuna, and USAJOBS every 6 hours. Credentialed
+sources report `not configured` without failing scheduler health until their
+keys are present. Attempt timestamps enforce those intervals after failures as
+well as successes, preventing a 30-minute retry loop from violating provider
+request limits.
 
 Generate the local LaunchAgent configuration with:
 
@@ -258,7 +306,7 @@ under `logs/`.
 
 ## What This Does Not Do Yet
 
-- No real scraping.
+- No direct LinkedIn or Indeed page scraping.
 - No notifications.
 - Gmail OAuth requires one-time local browser authorization.
 - No auto-apply behavior.

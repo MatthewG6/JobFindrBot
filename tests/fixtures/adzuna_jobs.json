@@ -1,0 +1,15 @@
+{
+  "results": [
+    {
+      "id": "adz-1",
+      "title": "Entry Level Software Developer",
+      "company": {"display_name": "Minnesota Example"},
+      "location": {"display_name": "Minneapolis, Minnesota"},
+      "redirect_url": "https://www.adzuna.com/details/adz-1",
+      "description": "Build &amp; maintain APIs.",
+      "salary_min": 65000,
+      "salary_max": 85000,
+      "created": "2026-08-02T08:30:00Z"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 import fcntl
@@ -13,20 +14,39 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.gmail_client import (
-    DEFAULT_GMAIL_DB_PATH,
-    GmailJobAlertClient,
-)
+from app.gmail_client import DEFAULT_GMAIL_DB_PATH, GmailJobAlertClient
+from app.source_credentials import SourceNotConfigured
 from app.storage import JobStorage
+from scripts.run_adzuna_scan import run_adzuna_scan
+from scripts.run_employer_watchlist_scan import run_employer_watchlist_scan
 from scripts.run_gmail_scan import run_gmail_scan
 from scripts.run_himalayas_scan import run_himalayas_scan
+from scripts.run_remotive_scan import run_remotive_scan
+from scripts.run_usajobs_scan import run_usajobs_scan
 
 
 DEFAULT_STATE_PATH = PROJECT_ROOT / "data" / "scheduler_state.json"
 DEFAULT_LOCK_PATH = PROJECT_ROOT / "data" / "scheduled_scan.lock"
 DEFAULT_HEALTH_PATH = PROJECT_ROOT / "data" / "scheduler_health.json"
 HIMALAYAS_INTERVAL = timedelta(hours=24)
+SOURCE_INTERVALS = {
+    "himalayas": HIMALAYAS_INTERVAL,
+    "remotive": timedelta(hours=6),
+    "employer_watchlist": timedelta(hours=6),
+    "adzuna": timedelta(hours=6),
+    "usajobs": timedelta(hours=6),
+}
 SourceRunner = Callable[[JobStorage], dict]
+
+
+def default_source_runners() -> dict[str, SourceRunner]:
+    return {
+        "himalayas": run_himalayas_scan,
+        "remotive": run_remotive_scan,
+        "employer_watchlist": run_employer_watchlist_scan,
+        "adzuna": run_adzuna_scan,
+        "usajobs": run_usajobs_scan,
+    }
 
 
 def load_scheduler_state(state_path: Path) -> dict:
@@ -70,12 +90,15 @@ def write_scheduler_state(state_path: Path, state: dict) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
-def himalayas_scan_due(
+def source_scan_due(
     state: dict,
+    source: str,
     now: datetime,
-    interval: timedelta = HIMALAYAS_INTERVAL,
+    interval: timedelta,
 ) -> bool:
-    value = state.get("himalayas_last_success_at")
+    value = state.get(f"{source}_last_attempt_at")
+    if not isinstance(value, str):
+        value = state.get(f"{source}_last_success_at")
     if not isinstance(value, str):
         return True
     try:
@@ -88,6 +111,14 @@ def himalayas_scan_due(
         return now >= last_success + interval
     except (OverflowError, ValueError):
         return True
+
+
+def himalayas_scan_due(
+    state: dict,
+    now: datetime,
+    interval: timedelta = HIMALAYAS_INTERVAL,
+) -> bool:
+    return source_scan_due(state, "himalayas", now, interval)
 
 
 def required_nonnegative_int(summary: dict, key: str) -> int:
@@ -112,11 +143,28 @@ def validate_gmail_summary(summary: object) -> dict:
     return summary
 
 
-def validate_himalayas_summary(summary: object) -> dict:
-    if not isinstance(summary, dict):
-        raise ValueError("Himalayas runner returned an invalid summary")
-    for key in ("jobs_fetched", "jobs_created", "duplicates_skipped"):
+def validate_source_summary(summary: object) -> dict:
+    if not isinstance(summary, dict) or not isinstance(summary.get("errors"), list):
+        raise ValueError("Source runner returned an invalid summary")
+    for key in (
+        "jobs_fetched",
+        "jobs_created",
+        "duplicates_skipped",
+        "records_received",
+        "records_filtered",
+        "records_rejected",
+    ):
         required_nonnegative_int(summary, key)
+    accounted_jobs = summary["jobs_created"] + summary["duplicates_skipped"]
+    if accounted_jobs != summary["jobs_fetched"]:
+        raise ValueError("Source summary counts do not balance")
+    accounted_records = (
+        summary["jobs_fetched"]
+        + summary["records_filtered"]
+        + summary["records_rejected"]
+    )
+    if accounted_records != summary["records_received"]:
+        raise ValueError("Source record counts do not balance")
     return summary
 
 
@@ -125,61 +173,117 @@ def default_gmail_runner(storage: JobStorage) -> dict:
     return run_gmail_scan(storage=storage, client=client)
 
 
-def default_himalayas_runner(storage: JobStorage) -> dict:
-    return run_himalayas_scan(storage=storage)
-
-
 def run_scheduled_scan(
     *,
     storage: JobStorage | None = None,
     state_path: Path = DEFAULT_STATE_PATH,
     now: datetime | None = None,
     gmail_runner: SourceRunner = default_gmail_runner,
-    himalayas_runner: SourceRunner = default_himalayas_runner,
+    source_runners: Mapping[str, SourceRunner] | None = None,
+    himalayas_runner: SourceRunner | None = None,
 ) -> dict:
     storage = storage or JobStorage(DEFAULT_GMAIL_DB_PATH)
     now = now or datetime.now(UTC)
     errors: list[dict[str, str]] = []
+    if source_runners is not None and himalayas_runner is not None:
+        raise ValueError("Use source_runners or himalayas_runner, not both")
+    if source_runners is not None:
+        runners = dict(source_runners)
+    elif himalayas_runner is not None:
+        runners = {"himalayas": himalayas_runner}
+    else:
+        runners = default_source_runners()
+    unknown_sources = set(runners) - set(SOURCE_INTERVALS)
+    if unknown_sources:
+        raise ValueError("Scheduler received an unknown source")
 
+    state_changed = False
     try:
         state = load_scheduler_state(state_path)
     except ValueError as error:
         state = {}
+        state_changed = True
         errors.append(
             {"source": "scheduler_state", "error_type": type(error).__name__}
         )
 
-    summary = {
-        "gmail": None,
-        "himalayas": None,
-        "himalayas_due": himalayas_scan_due(state, now),
-        "errors": errors,
-    }
+    summary: dict = {"gmail": None, "sources": {}, "errors": errors}
 
     try:
         gmail_summary = validate_gmail_summary(gmail_runner(storage))
         summary["gmail"] = gmail_summary
-        if gmail_summary.get("errors"):
-            errors.append(
-                {
-                    "source": "gmail",
-                    "error_type": "GmailMessageErrors",
-                }
-            )
+        if gmail_summary["errors"]:
+            errors.append({"source": "gmail", "error_type": "GmailMessageErrors"})
     except Exception as error:
         errors.append({"source": "gmail", "error_type": type(error).__name__})
 
-    if summary["himalayas_due"]:
+    state_writable = True
+    for source, runner in runners.items():
+        due = source_scan_due(state, source, now, SOURCE_INTERVALS[source])
+        source_result = {"due": due, "status": "not_due", "summary": None}
+        summary["sources"][source] = source_result
+        if not due:
+            continue
+        if not state_writable:
+            source_result["status"] = "failed"
+            continue
+
+        attempt_key = f"{source}_last_attempt_at"
+        previous_attempt = state.get(attempt_key)
+        state[attempt_key] = now.isoformat()
         try:
-            himalayas_summary = validate_himalayas_summary(
-                himalayas_runner(storage)
+            write_scheduler_state(state_path, state)
+            state_changed = False
+        except Exception as error:
+            if previous_attempt is None:
+                state.pop(attempt_key, None)
+            else:
+                state[attempt_key] = previous_attempt
+            source_result["status"] = "failed"
+            state_writable = False
+            errors.append(
+                {"source": "scheduler_state", "error_type": type(error).__name__}
             )
-            summary["himalayas"] = himalayas_summary
-            state["himalayas_last_success_at"] = now.isoformat()
+            continue
+
+        try:
+            source_summary = validate_source_summary(runner(storage))
+            source_result["summary"] = source_summary
+            if source_summary["errors"]:
+                source_result["status"] = "failed"
+                errors.append(
+                    {"source": source, "error_type": "SourceItemErrors"}
+                )
+                continue
+            source_result["status"] = "ok"
+            state[f"{source}_last_success_at"] = now.isoformat()
+            state_changed = True
+        except SourceNotConfigured:
+            if previous_attempt is None:
+                state.pop(attempt_key, None)
+            else:
+                state[attempt_key] = previous_attempt
+            try:
+                write_scheduler_state(state_path, state)
+            except Exception as error:
+                state_writable = False
+                errors.append(
+                    {
+                        "source": "scheduler_state",
+                        "error_type": type(error).__name__,
+                    }
+                )
+            source_result["status"] = "not_configured"
+        except Exception as error:
+            source_result["status"] = "failed"
+            errors.append({"source": source, "error_type": type(error).__name__})
+
+    if state_changed:
+        try:
             write_scheduler_state(state_path, state)
         except Exception as error:
             errors.append(
-                {"source": "himalayas", "error_type": type(error).__name__}
+                {"source": "scheduler_state", "error_type": type(error).__name__}
             )
 
     return summary
@@ -199,18 +303,21 @@ def print_summary(summary: dict) -> None:
             f"errors={len(gmail['errors'])}"
         )
 
-    himalayas = summary["himalayas"]
-    if not summary["himalayas_due"]:
-        print("Himalayas: not due")
-    elif himalayas is None:
-        print("Himalayas: failed")
-    else:
-        print(
-            "Himalayas: "
-            f"fetched={himalayas['jobs_fetched']} "
-            f"created={himalayas['jobs_created']} "
-            f"duplicates={himalayas['duplicates_skipped']}"
-        )
+    for source, result in summary["sources"].items():
+        source_summary = result["summary"]
+        if result["status"] in {"not_due", "not_configured"}:
+            print(f"{source}: {result['status'].replace('_', ' ')}")
+        elif source_summary is None:
+            print(f"{source}: failed")
+        else:
+            print(
+                f"{source}: status={result['status']} "
+                f"fetched={source_summary['jobs_fetched']} "
+                f"created={source_summary['jobs_created']} "
+                f"duplicates={source_summary['duplicates_skipped']} "
+                f"rejected={source_summary['records_rejected']} "
+                f"errors={len(source_summary['errors'])}"
+            )
 
     print(f"Source errors: {len(summary['errors'])}")
     for error in summary["errors"]:

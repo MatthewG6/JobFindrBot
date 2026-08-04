@@ -1,0 +1,16 @@
+[
+  {
+    "id": "lever-1",
+    "text": "Full Stack Developer",
+    "hostedUrl": "https://jobs.lever.co/example/lever-1",
+    "categories": {"location": "Minneapolis, MN"},
+    "descriptionPlain": "Build product features.",
+    "createdAt": 1785672000000
+  },
+  {
+    "id": "lever-2",
+    "text": "Product Designer",
+    "hostedUrl": "https://jobs.lever.co/example/lever-2",
+    "categories": {"location": "Remote"}
+  }
+]
