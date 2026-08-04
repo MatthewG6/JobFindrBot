@@ -15,6 +15,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.gmail_client import DEFAULT_GMAIL_DB_PATH, GmailJobAlertClient
+from app.discord_notifications import (
+    DiscordNotConfigured,
+    run_discord_notifications,
+)
 from app.source_credentials import SourceNotConfigured
 from app.storage import JobStorage
 from scripts.run_adzuna_scan import run_adzuna_scan
@@ -37,6 +41,7 @@ SOURCE_INTERVALS = {
     "usajobs": timedelta(hours=6),
 }
 SourceRunner = Callable[[JobStorage], dict]
+NotificationRunner = Callable[[JobStorage], dict]
 
 
 def default_source_runners() -> dict[str, SourceRunner]:
@@ -168,9 +173,49 @@ def validate_source_summary(summary: object) -> dict:
     return summary
 
 
+def validate_notification_summary(summary: object) -> dict:
+    if not isinstance(summary, dict) or not isinstance(summary.get("errors"), list):
+        raise ValueError("Notification runner returned an invalid summary")
+    if summary.get("status") not in {
+        "deferred",
+        "initialized",
+        "ok",
+        "failed",
+    }:
+        raise ValueError("Notification runner returned an invalid status")
+    for key in (
+        "threshold",
+        "eligible_jobs",
+        "baseline_count",
+        "notifications_attempted",
+        "notifications_delivered",
+        "notifications_skipped",
+        "notifications_attention_required",
+    ):
+        required_nonnegative_int(summary, key)
+    if summary["notifications_delivered"] > summary["notifications_attempted"]:
+        raise ValueError("Notification summary counts do not balance")
+    status = summary["status"]
+    has_errors = bool(summary["errors"])
+    if (status == "failed") != has_errors:
+        raise ValueError("Notification summary status does not match errors")
+    if status in {"initialized", "deferred"} and (
+        summary["notifications_attempted"]
+        or summary["notifications_delivered"]
+    ):
+        raise ValueError("Inactive notification summary contains attempts")
+    if status != "initialized" and summary["baseline_count"]:
+        raise ValueError("Notification summary contains an invalid baseline")
+    return summary
+
+
 def default_gmail_runner(storage: JobStorage) -> dict:
     client = GmailJobAlertClient.from_local_oauth(allow_interactive=False)
     return run_gmail_scan(storage=storage, client=client)
+
+
+def default_notification_runner(storage: JobStorage) -> dict:
+    return run_discord_notifications(storage)
 
 
 def run_scheduled_scan(
@@ -181,6 +226,7 @@ def run_scheduled_scan(
     gmail_runner: SourceRunner = default_gmail_runner,
     source_runners: Mapping[str, SourceRunner] | None = None,
     himalayas_runner: SourceRunner | None = None,
+    notification_runner: NotificationRunner | None = None,
 ) -> dict:
     storage = storage or JobStorage(DEFAULT_GMAIL_DB_PATH)
     now = now or datetime.now(UTC)
@@ -207,7 +253,12 @@ def run_scheduled_scan(
             {"source": "scheduler_state", "error_type": type(error).__name__}
         )
 
-    summary: dict = {"gmail": None, "sources": {}, "errors": errors}
+    summary: dict = {
+        "gmail": None,
+        "sources": {},
+        "discord": None,
+        "errors": errors,
+    }
 
     try:
         gmail_summary = validate_gmail_summary(gmail_runner(storage))
@@ -286,6 +337,24 @@ def run_scheduled_scan(
                 {"source": "scheduler_state", "error_type": type(error).__name__}
             )
 
+    if notification_runner is not None:
+        try:
+            discord_summary = validate_notification_summary(
+                notification_runner(storage)
+            )
+            summary["discord"] = discord_summary
+            if discord_summary["errors"]:
+                errors.append(
+                    {"source": "discord", "error_type": "DiscordDeliveryErrors"}
+                )
+        except DiscordNotConfigured:
+            summary["discord"] = {"status": "not_configured"}
+        except Exception as error:
+            summary["discord"] = {"status": "failed"}
+            errors.append(
+                {"source": "discord", "error_type": type(error).__name__}
+            )
+
     return summary
 
 
@@ -318,6 +387,25 @@ def print_summary(summary: dict) -> None:
                 f"rejected={source_summary['records_rejected']} "
                 f"errors={len(source_summary['errors'])}"
             )
+
+    discord = summary.get("discord")
+    if discord is None:
+        print("discord: disabled")
+    elif discord["status"] == "not_configured":
+        print("discord: not configured")
+    elif discord == {"status": "failed"}:
+        print("discord: failed")
+    else:
+        print(
+            "discord: "
+            f"status={discord['status']} "
+            f"eligible={discord['eligible_jobs']} "
+            f"baseline={discord['baseline_count']} "
+            f"attempted={discord['notifications_attempted']} "
+            f"delivered={discord['notifications_delivered']} "
+            f"attention={discord['notifications_attention_required']} "
+            f"errors={len(discord['errors'])}"
+        )
 
     print(f"Source errors: {len(summary['errors'])}")
     for error in summary["errors"]:
@@ -361,7 +449,9 @@ def main() -> None:
             print("Jobbot scheduled scan skipped: another scan is running")
             return
         try:
-            summary = run_scheduled_scan()
+            summary = run_scheduled_scan(
+                notification_runner=default_notification_runner,
+            )
             print_summary(summary)
             success = not summary["errors"]
             write_scheduler_health(success, len(summary["errors"]))

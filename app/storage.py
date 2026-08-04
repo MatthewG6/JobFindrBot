@@ -1,5 +1,6 @@
-import fcntl
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
+import fcntl
 from pathlib import Path
 from threading import Lock, RLock, local
 from types import TracebackType
@@ -98,6 +99,10 @@ class JobStorage:
         self.jobs_table = self.db.table("jobs")
         self.applications_table = self.db.table("applications")
         self.processed_emails_table = self.db.table("processed_emails")
+        self.job_notifications_table = self.db.table("job_notifications")
+        self.notification_channels_table = self.db.table(
+            "notification_channels"
+        )
 
     def _reload(self) -> None:
         self.db.close()
@@ -145,7 +150,7 @@ class JobStorage:
             if existing is None:
                 return None
 
-            return {"id": existing.doc_id, **existing}
+            return {**existing, "id": existing.doc_id}
 
     def save_job(self, job_data: dict | JobPosting) -> dict:
         saved_job, _ = self.save_job_with_status(job_data)
@@ -168,11 +173,11 @@ class JobStorage:
                 return existing, False
 
             document_id = self.jobs_table.insert(data)
-            return {"id": document_id, **data}, True
+            return {**data, "id": document_id}, True
 
     def list_jobs(self) -> list[dict]:
         with self._access():
-            return [{"id": job.doc_id, **job} for job in self.jobs_table.all()]
+            return [{**job, "id": job.doc_id} for job in self.jobs_table.all()]
 
     def list_top_jobs(self) -> list[dict]:
         return sorted(
@@ -193,12 +198,12 @@ class JobStorage:
             )
             if email is None:
                 return None
-            return {"id": email.doc_id, **email}
+            return {**email, "id": email.doc_id}
 
     def list_processed_emails(self) -> list[dict]:
         with self._access():
             return [
-                {"id": email.doc_id, **email}
+                {**email, "id": email.doc_id}
                 for email in self.processed_emails_table.all()
             ]
 
@@ -222,19 +227,331 @@ class JobStorage:
                 "processed_at": utc_now().isoformat(),
             }
             document_id = self.processed_emails_table.insert(data)
-            return {"id": document_id, **data}
+            return {**data, "id": document_id}
+
+    def notification_channel_initialized(self, channel: str) -> bool:
+        with self._access():
+            channels = Query()
+            return self.notification_channels_table.contains(
+                channels.channel == channel
+            )
+
+    def notification_channel_deferred(self, channel: str) -> bool:
+        with self._access():
+            channels = Query()
+            existing = self.notification_channels_table.get(
+                channels.channel == channel
+            )
+            if existing is None:
+                return False
+            try:
+                retry_after = datetime.fromisoformat(
+                    existing["retry_after_at"]
+                )
+                if retry_after.tzinfo is None:
+                    retry_after = retry_after.replace(tzinfo=UTC)
+                return utc_now() < retry_after.astimezone(UTC)
+            except (KeyError, OverflowError, TypeError, ValueError):
+                return False
+
+    def notification_channel_disabled(self, channel: str) -> bool:
+        with self._access():
+            channels = Query()
+            existing = self.notification_channels_table.get(
+                channels.channel == channel
+            )
+            return bool(existing and existing.get("disabled"))
+
+    def synchronize_notification_channel(
+        self,
+        channel: str,
+        configuration_id: str | None,
+    ) -> None:
+        if configuration_id is None:
+            return
+        with self._access():
+            channels = Query()
+            existing = self.notification_channels_table.get(
+                channels.channel == channel
+            )
+            if existing is None or existing.get("configuration_id") == (
+                configuration_id
+            ):
+                return
+            self.notification_channels_table.update(
+                {
+                    "configuration_id": configuration_id,
+                    "disabled": False,
+                    "disabled_error_type": None,
+                    "retry_after_at": None,
+                    "updated_at": utc_now().isoformat(),
+                },
+                doc_ids=[existing.doc_id],
+            )
+
+    def disable_notification_channel(
+        self,
+        channel: str,
+        error_type: str,
+    ) -> None:
+        with self._access():
+            channels = Query()
+            existing = self.notification_channels_table.get(
+                channels.channel == channel
+            )
+            if existing is None:
+                raise ValueError("Notification channel is not initialized")
+            self.notification_channels_table.update(
+                {
+                    "disabled": True,
+                    "disabled_error_type": error_type,
+                    "updated_at": utc_now().isoformat(),
+                },
+                doc_ids=[existing.doc_id],
+            )
+
+    def defer_notification_channel(
+        self,
+        channel: str,
+        retry_after: timedelta,
+    ) -> None:
+        with self._access():
+            channels = Query()
+            existing = self.notification_channels_table.get(
+                channels.channel == channel
+            )
+            if existing is None:
+                raise ValueError("Notification channel is not initialized")
+            now = utc_now()
+            self.notification_channels_table.update(
+                {
+                    "retry_after_at": (now + retry_after).isoformat(),
+                    "updated_at": now.isoformat(),
+                },
+                doc_ids=[existing.doc_id],
+            )
+
+    def initialize_notification_channel(
+        self,
+        channel: str,
+        baseline_job_ids: list[int],
+        configuration_id: str | None = None,
+    ) -> tuple[bool, int]:
+        with self._access():
+            channels = Query()
+            if self.notification_channels_table.contains(
+                channels.channel == channel
+            ):
+                return False, 0
+
+            notifications = Query()
+            now = utc_now().isoformat()
+            baseline_count = 0
+            for job_id in baseline_job_ids:
+                existing = self.job_notifications_table.get(
+                    (notifications.channel == channel)
+                    & (notifications.job_id == job_id)
+                )
+                if existing is not None:
+                    continue
+                self.job_notifications_table.insert(
+                    {
+                        "channel": channel,
+                        "job_id": job_id,
+                        "status": "baseline",
+                        "attempts": 0,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                )
+                baseline_count += 1
+
+            self.notification_channels_table.insert(
+                {
+                    "channel": channel,
+                    "configuration_id": configuration_id,
+                    "disabled": False,
+                    "initialized_at": now,
+                }
+            )
+            return True, baseline_count
+
+    def list_job_notifications(self, channel: str | None = None) -> list[dict]:
+        with self._access():
+            notifications = self.job_notifications_table.all()
+            if channel is not None:
+                notifications = [
+                    item for item in notifications if item.get("channel") == channel
+                ]
+            return [
+                {**notification, "id": notification.doc_id}
+                for notification in notifications
+            ]
+
+    def list_attention_required_notifications(
+        self,
+        channel: str,
+    ) -> list[dict]:
+        return [
+            notification
+            for notification in self.list_job_notifications(channel)
+            if notification.get("status") in {"pending", "unknown"}
+        ]
+
+    def get_job_notification(self, channel: str, job_id: int) -> dict | None:
+        with self._access():
+            notifications = Query()
+            notification = self.job_notifications_table.get(
+                (notifications.channel == channel)
+                & (notifications.job_id == job_id)
+            )
+            if notification is None:
+                return None
+            return {**notification, "id": notification.doc_id}
+
+    def reserve_job_notification(
+        self,
+        channel: str,
+        job_id: int,
+    ) -> bool:
+        with self._access():
+            notifications = Query()
+            existing = self.job_notifications_table.get(
+                (notifications.channel == channel)
+                & (notifications.job_id == job_id)
+            )
+            now = utc_now()
+            if existing is not None:
+                status = existing.get("status")
+                if status in {"baseline", "delivered", "pending", "unknown"}:
+                    return False
+
+                self.job_notifications_table.update(
+                    {
+                        "status": "pending",
+                        "attempts": (
+                            existing.get("attempts", 0) + 1
+                            if isinstance(existing.get("attempts", 0), int)
+                            and not isinstance(existing.get("attempts", 0), bool)
+                            else 1
+                        ),
+                        "updated_at": now.isoformat(),
+                    },
+                    doc_ids=[existing.doc_id],
+                )
+                return True
+
+            self.job_notifications_table.insert(
+                {
+                    "channel": channel,
+                    "job_id": job_id,
+                    "status": "pending",
+                    "attempts": 1,
+                    "created_at": now.isoformat(),
+                    "updated_at": now.isoformat(),
+                }
+            )
+            return True
+
+    def complete_job_notification(
+        self,
+        channel: str,
+        job_id: int,
+        external_id: str,
+    ) -> None:
+        self._update_job_notification(
+            channel,
+            job_id,
+            {"status": "delivered", "external_id": external_id},
+        )
+
+    def fail_job_notification(
+        self,
+        channel: str,
+        job_id: int,
+        error_type: str,
+    ) -> None:
+        self._update_job_notification(
+            channel,
+            job_id,
+            {"status": "failed", "error_type": error_type},
+        )
+
+    def mark_job_notification_unknown(
+        self,
+        channel: str,
+        job_id: int,
+        error_type: str,
+        external_id: str | None = None,
+    ) -> None:
+        updates = {"status": "unknown", "error_type": error_type}
+        if external_id is not None:
+            updates["external_id"] = external_id
+        self._update_job_notification(channel, job_id, updates)
+
+    def resolve_job_notification(
+        self,
+        channel: str,
+        job_id: int,
+        resolution: str,
+    ) -> None:
+        if resolution not in {"delivered", "retry"}:
+            raise ValueError("Unsupported notification resolution")
+        with self._access():
+            notifications = Query()
+            existing = self.job_notifications_table.get(
+                (notifications.channel == channel)
+                & (notifications.job_id == job_id)
+            )
+            if existing is None or existing.get("status") not in {
+                "pending",
+                "unknown",
+            }:
+                raise ValueError("Notification does not require attention")
+            updates = {
+                "status": "delivered" if resolution == "delivered" else "failed",
+                "error_type": (
+                    "ManuallyMarkedDelivered"
+                    if resolution == "delivered"
+                    else "ManualRetryApproved"
+                ),
+                "updated_at": utc_now().isoformat(),
+            }
+            self.job_notifications_table.update(
+                updates,
+                doc_ids=[existing.doc_id],
+            )
+
+    def _update_job_notification(
+        self,
+        channel: str,
+        job_id: int,
+        updates: dict,
+    ) -> None:
+        with self._access():
+            notifications = Query()
+            existing = self.job_notifications_table.get(
+                (notifications.channel == channel)
+                & (notifications.job_id == job_id)
+            )
+            if existing is None:
+                raise ValueError("Job notification reservation does not exist")
+            self.job_notifications_table.update(
+                {**updates, "updated_at": utc_now().isoformat()},
+                doc_ids=[existing.doc_id],
+            )
 
     def get_application(self, application_id: int) -> dict | None:
         with self._access():
             application = self.applications_table.get(doc_id=application_id)
             if application is None:
                 return None
-            return {"id": application.doc_id, **application}
+            return {**application, "id": application.doc_id}
 
     def list_applications(self) -> list[dict]:
         with self._access():
             return [
-                {"id": application.doc_id, **application}
+                {**application, "id": application.doc_id}
                 for application in self.applications_table.all()
             ]
 
@@ -251,7 +568,7 @@ class JobStorage:
             applications = Query()
             existing = self.applications_table.get(applications.job_id == job_id)
             if existing is not None:
-                return {"id": existing.doc_id, **existing}
+                return {**existing, "id": existing.doc_id}
 
             message = (
                 initial_message
@@ -271,7 +588,7 @@ class JobStorage:
             document_id = self.applications_table.insert(
                 application.model_dump(mode="json")
             )
-            return {"id": document_id, **application.model_dump(mode="json")}
+            return {**application.model_dump(mode="json"), "id": document_id}
 
     def add_application_event(
         self,

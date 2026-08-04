@@ -55,7 +55,7 @@ The assistant should avoid or heavily penalize postings that are clearly not a g
 - BeautifulSoup and requests for API response normalization
 - pytest for tests
 - macOS launchd for scheduled scans
-- Telegram bot or Discord webhook for notifications later
+- Discord incoming webhook for high-fit job notifications
 
 Not planned for the early version:
 
@@ -226,8 +226,8 @@ python scripts/run_remotive_scan.py
 python scripts/run_employer_watchlist_scan.py
 ```
 
-Adzuna and USAJOBS remain safely disabled until credentials are configured.
-Create `credentials/source_api.json` from
+Adzuna and USAJOBS require local credentials. Create
+`credentials/source_api.json` from
 `config/source_credentials.example.json`, fill in the values, and keep the file
 local. Jobbot repairs the directory to mode `0700` and the file to `0600` before
 reading it. This private JSON file is required for scheduled launchd scans.
@@ -304,10 +304,69 @@ read-only Gmail token without opening an interactive browser, prevents overlappi
 runs, stores source timing in `data/scheduler_state.json`, and writes local output
 under `logs/`.
 
+## Discord Notifications
+
+Discord is Jobbot's outbound review inbox. After every scheduled scan, Jobbot
+posts newly discovered jobs with a fit score of at least 40 to a private Discord
+channel. Each message includes the role, company, location, source, fit reasons,
+watch-outs, salary when available, and a public job link. Discord does not approve,
+answer, or submit applications in V1.
+
+Create and connect the webhook:
+
+1. Create a private Discord channel named `jobbot-alerts`.
+2. Open **Edit Channel**, then **Integrations** and **Webhooks**.
+3. Select **New Webhook**, name it `Jobbot`, choose `jobbot-alerts`, and copy its
+   webhook URL.
+4. Create the private local file from the example:
+
+   ```bash
+   cp config/discord_credentials.example.json credentials/discord.json
+   chmod 600 credentials/discord.json
+   ```
+
+5. Replace the example value in `credentials/discord.json` with the copied URL.
+   Do not paste this URL into chat, logs, source control, or screenshots; it grants
+   permission to post into the channel.
+6. Send a connection test:
+
+   ```bash
+   .venv/bin/python scripts/run_discord_notifications.py --test
+   ```
+
+7. Initialize notification tracking:
+
+   ```bash
+   .venv/bin/python scripts/run_discord_notifications.py
+   ```
+
+The initialization command records existing qualifying jobs without posting them,
+preventing an alert flood. Later 30-minute scans notify only newly qualifying jobs,
+up to 10 per cycle. Delivered jobs are recorded so they are not posted twice.
+Discord rate-limit cooldowns are honored before another delivery attempt. If a
+request has an uncertain outcome, Jobbot does not retry it automatically; this
+favors avoiding duplicate alerts over guaranteed delivery. If Discord reports a
+deleted or unauthorized webhook, Jobbot disables delivery until the webhook URL
+is replaced.
+
+If scheduler health reports a notification requiring attention, inspect it with:
+
+```bash
+.venv/bin/python scripts/run_discord_notifications.py --list-attention
+```
+
+After checking the Discord channel, explicitly resolve each uncertain job as
+delivered or retryable:
+
+```bash
+.venv/bin/python scripts/run_discord_notifications.py --mark-delivered JOB_ID
+.venv/bin/python scripts/run_discord_notifications.py --retry JOB_ID
+```
+
 ## What This Does Not Do Yet
 
 - No direct LinkedIn or Indeed page scraping.
-- No notifications.
+- No Discord approval commands or interactive application controls.
 - Gmail OAuth requires one-time local browser authorization.
 - No auto-apply behavior.
 - No browser automation.

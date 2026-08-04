@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 
+from app.discord_notifications import DiscordNotConfigured
 from app.source_credentials import SourceNotConfigured
 from app.storage import JobStorage
 from scripts.run_scheduled_scan import (
@@ -39,6 +40,20 @@ def source_summary(errors: list | None = None) -> dict:
         "records_received": 3,
         "records_filtered": 0,
         "records_rejected": 0,
+        "errors": errors or [],
+    }
+
+
+def notification_summary(errors: list | None = None) -> dict:
+    return {
+        "status": "failed" if errors else "ok",
+        "threshold": 40,
+        "eligible_jobs": 2,
+        "baseline_count": 0,
+        "notifications_attempted": 2,
+        "notifications_delivered": 2 if not errors else 1,
+        "notifications_skipped": 0,
+        "notifications_attention_required": 0,
         "errors": errors or [],
     }
 
@@ -130,6 +145,99 @@ def test_gmail_runs_on_every_scheduler_wake(tmp_path: Path) -> None:
         )
 
     assert calls == 3
+
+
+def test_discord_runs_after_job_sources(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    summary = run_scheduled_scan(
+        storage=JobStorage(tmp_path / "jobs.json"),
+        state_path=tmp_path / "state.json",
+        now=NOW,
+        gmail_runner=lambda storage: calls.append("gmail") or gmail_summary(),
+        source_runners={
+            "remotive": lambda storage: calls.append("remotive")
+            or source_summary()
+        },
+        notification_runner=lambda storage: calls.append("discord")
+        or notification_summary(),
+    )
+
+    assert calls == ["gmail", "remotive", "discord"]
+    assert summary["discord"]["status"] == "ok"
+    assert summary["errors"] == []
+
+
+def test_discord_not_configured_does_not_fail_scheduler(tmp_path: Path) -> None:
+    def not_configured(storage: JobStorage) -> dict:
+        raise DiscordNotConfigured("private webhook detail")
+
+    summary = run_scheduled_scan(
+        storage=JobStorage(tmp_path / "jobs.json"),
+        state_path=tmp_path / "state.json",
+        now=NOW,
+        gmail_runner=lambda storage: gmail_summary(),
+        source_runners={},
+        notification_runner=not_configured,
+    )
+
+    assert summary["discord"] == {"status": "not_configured"}
+    assert summary["errors"] == []
+
+
+def test_discord_delivery_errors_fail_health_without_details(
+    tmp_path: Path,
+) -> None:
+    summary = run_scheduled_scan(
+        storage=JobStorage(tmp_path / "jobs.json"),
+        state_path=tmp_path / "state.json",
+        now=NOW,
+        gmail_runner=lambda storage: gmail_summary(),
+        source_runners={},
+        notification_runner=lambda storage: notification_summary(
+            [{"job_id": 999, "error_type": "PrivateDeliveryError"}]
+        ),
+    )
+
+    assert summary["discord"]["status"] == "failed"
+    assert summary["errors"] == [
+        {"source": "discord", "error_type": "DiscordDeliveryErrors"}
+    ]
+
+
+def test_malformed_discord_summary_is_isolated(tmp_path: Path) -> None:
+    summary = run_scheduled_scan(
+        storage=JobStorage(tmp_path / "jobs.json"),
+        state_path=tmp_path / "state.json",
+        now=NOW,
+        gmail_runner=lambda storage: gmail_summary(),
+        source_runners={},
+        notification_runner=lambda storage: {},
+    )
+
+    assert summary["discord"] == {"status": "failed"}
+    assert summary["errors"] == [
+        {"source": "discord", "error_type": "ValueError"}
+    ]
+
+
+def test_contradictory_discord_summary_fails_validation(tmp_path: Path) -> None:
+    invalid = notification_summary()
+    invalid["status"] = "failed"
+
+    summary = run_scheduled_scan(
+        storage=JobStorage(tmp_path / "jobs.json"),
+        state_path=tmp_path / "state.json",
+        now=NOW,
+        gmail_runner=lambda storage: gmail_summary(),
+        source_runners={},
+        notification_runner=lambda storage: invalid,
+    )
+
+    assert summary["discord"] == {"status": "failed"}
+    assert summary["errors"] == [
+        {"source": "discord", "error_type": "ValueError"}
+    ]
 
 
 def test_source_not_configured_is_not_a_scheduler_error(tmp_path: Path) -> None:
@@ -447,12 +555,16 @@ def test_print_summary_does_not_print_private_error_details(capsys) -> None:
                 ),
             }
         },
+        "discord": notification_summary(
+            [{"job_id": 777, "error_type": "PrivateDiscordError"}]
+        ),
         "errors": [
             {"source": "gmail", "error_type": "GmailMessageErrors"},
             {
                 "source": "employer_watchlist",
                 "error_type": "SourceItemErrors",
             },
+            {"source": "discord", "error_type": "DiscordDeliveryErrors"},
         ],
     }
 
@@ -463,6 +575,8 @@ def test_print_summary_does_not_print_private_error_details(capsys) -> None:
     assert "PrivateError" not in output
     assert "private-site" not in output
     assert "SecretError" not in output
+    assert "777" not in output
+    assert "PrivateDiscordError" not in output
     assert "GmailMessageErrors" in output
 
 
