@@ -17,8 +17,22 @@ from scripts.install_launchd_scheduler import (
 )
 
 
-def test_launchd_configuration_runs_every_thirty_minutes() -> None:
-    configuration = launchd_configuration()
+def fake_project_root(tmp_path: Path) -> Path:
+    project_root = tmp_path / "JobFindrBot"
+    python_path = project_root / ".venv" / "bin" / "python"
+    runner_path = project_root / "scripts" / "run_scheduled_scan.py"
+    python_path.parent.mkdir(parents=True)
+    runner_path.parent.mkdir(parents=True)
+    python_path.touch()
+    runner_path.touch()
+    return project_root
+
+
+def test_launchd_configuration_runs_every_thirty_minutes(
+    tmp_path: Path,
+) -> None:
+    project_root = fake_project_root(tmp_path)
+    configuration = launchd_configuration(project_root=project_root)
 
     assert configuration["Label"] == LAUNCHD_LABEL
     assert configuration["StartInterval"] == 1800
@@ -30,11 +44,14 @@ def test_launchd_configuration_runs_every_thirty_minutes() -> None:
     assert configuration["ProgramArguments"][1].endswith(
         "/scripts/run_scheduled_scan.py"
     )
-    assert configuration["WorkingDirectory"].endswith("/JobFindrBot")
+    assert configuration["WorkingDirectory"] == str(project_root)
 
 
 def test_install_plist_writes_valid_launchd_file(tmp_path: Path) -> None:
-    plist_path = install_plist(tmp_path / "com.jobfindrbot.scan.plist")
+    plist_path = install_plist(
+        tmp_path / "com.jobfindrbot.scan.plist",
+        project_root=fake_project_root(tmp_path),
+    )
 
     with plist_path.open("rb") as plist_file:
         configuration = plistlib.load(plist_file)
@@ -167,7 +184,11 @@ def test_failed_upgrade_restores_previous_plist(tmp_path: Path) -> None:
         return subprocess.CompletedProcess(command, 0)
 
     with pytest.raises(subprocess.CalledProcessError):
-        install_and_activate(plist_path, run_command=fake_run)
+        install_and_activate(
+            plist_path,
+            run_command=fake_run,
+            project_root=fake_project_root(tmp_path),
+        )
 
     with plist_path.open("rb") as plist_file:
         restored = plistlib.load(plist_file)

@@ -76,10 +76,14 @@ def write_plist(plist_path: Path, configuration: dict) -> Path:
 def install_plist(
     plist_path: Path = DEFAULT_PLIST_PATH,
     install_nonce: str | None = None,
+    project_root: Path = PROJECT_ROOT,
 ) -> Path:
     return write_plist(
         plist_path,
-        launchd_configuration(install_nonce=install_nonce),
+        launchd_configuration(
+            project_root=project_root,
+            install_nonce=install_nonce,
+        ),
     )
 
 
@@ -182,13 +186,18 @@ def install_and_activate(
     plist_path: Path = DEFAULT_PLIST_PATH,
     run_command: Callable = subprocess.run,
     wait_for_health: Callable = wait_for_scheduler_health,
+    project_root: Path = PROJECT_ROOT,
 ) -> tuple[Path, str]:
     previous_content = plist_path.read_bytes() if plist_path.is_file() else None
     was_loaded = launch_agent_is_loaded(run_command)
     install_nonce = uuid.uuid4().hex
 
     try:
-        install_plist(plist_path, install_nonce=install_nonce)
+        install_plist(
+            plist_path,
+            install_nonce=install_nonce,
+            project_root=project_root,
+        )
         started_at = datetime.now(UTC)
         service = activate_launch_agent(plist_path, run_command=run_command)
         wait_for_health(started_at, install_nonce)
