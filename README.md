@@ -1,9 +1,16 @@
 # Jobbot
 
-Jobbot is a local, human-in-the-loop job-search assistant for discovering,
-scoring, reviewing, and tracking software engineering opportunities.
+Jobbot is a local, Discord-operated, human-in-the-loop assistant for finding,
+scoring, reviewing, tracking, and applying to software engineering jobs.
 
-The project is designed to run locally on a personal computer. It is not an auto-apply bot, and it should never submit applications or answer sensitive application questions without explicit human approval.
+The project is designed to run locally on a personal computer while Matthew
+controls it remotely through Discord. It should make the application process
+almost hands-free, but it is not an auto-apply bot: unknown questions,
+consequential decisions, and every final submission require human review.
+
+The durable product contract, target Discord workflow, answer-memory rules, and
+approval gates are defined in
+[docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md).
 
 ## Project Goals
 
@@ -11,6 +18,9 @@ The project is designed to run locally on a personal computer. It is not an auto
 - Score jobs based on how well they match Matthew Glassman's target roles and locations.
 - Save job postings in a simple local database.
 - Notify when a posting looks like a strong fit.
+- Coordinate application progress, questions, and confirmations through Discord.
+- Remember approved answers so Matthew is not repeatedly asked the same thing.
+- Present every proposed answer for final review before submission.
 - Keep the code readable, testable, and realistic for a growing developer.
 
 ## Target Roles
@@ -57,6 +67,7 @@ The assistant should avoid or heavily penalize postings that are clearly not a g
 - pytest for tests
 - macOS launchd for scheduled scans
 - Discord incoming webhook for high-fit job notifications
+- Discord bot for notifications, commands, questions, and approvals
 
 Not planned for the early version:
 
@@ -107,6 +118,11 @@ POST /applications/{application_id}/reject
 POST /applications/{application_id}/approve-submit
 POST /applications/{application_id}/transitions
 ```
+
+The Discord foundation is also available as an explicitly configured local
+process. It currently exposes only `/status`, `/help`, and
+`/test-notification`. None of these commands can begin, advance, or submit an
+application.
 
 `POST /jobs` and `POST /jobs/manual` both use the same ingestion pipeline. `POST /scan/fake` runs two hardcoded sample jobs through that same pipeline so the workflow can be tested without real scraping.
 `POST /applications/candidates` creates approval-ready application records for saved jobs whose fit score meets the application threshold.
@@ -411,6 +427,41 @@ delivered or retryable:
 - No browser automation.
 - No AI scoring.
 
+## Discord Foundation
+
+The Discord bot is restricted to one configured user, guild, and channel. Its
+slash commands are synchronized only to that guild. Unauthorized commands are
+rejected ephemerally, processed interaction IDs are persisted to prevent
+duplicate work, and message context storage survives local restarts.
+
+Create a Discord application and bot in the Discord Developer Portal, install
+it in your private server with permission to use application commands and send
+messages, and configure:
+
+```text
+DISCORD_BOT_TOKEN
+DISCORD_APPLICATION_ID
+DISCORD_GUILD_ID
+DISCORD_CHANNEL_ID
+DISCORD_ALLOWED_USER_ID
+```
+
+The values are documented in `.env.example`. Keep the real token in the
+environment or a local `.env` file; `.env` is ignored by git. The application
+does not automatically load `.env`, so export the variables or use a trusted
+local process manager that loads them.
+
+Start the bot:
+
+```bash
+python scripts/run_discord_bot.py
+```
+
+The process validates all required configuration before connecting. It uses no
+privileged Discord gateway intents. Keep `discord.enabled` and
+`discord.application_actions_enabled` set to `false` in `config.yaml` until a
+later milestone explicitly wires runtime orchestration and approval gates.
+
 ## Project Structure
 
 ```text
@@ -473,10 +524,16 @@ pytest
 This project should:
 
 - Run only on a personal machine and personal network.
-- Never submit job applications automatically.
+- Treat Discord as the primary remote control and status interface.
+- Never submit a job application without explicit, application-specific final
+  approval.
 - Never guess legally sensitive answers.
-- Never answer custom application questions without human review.
-- Keep any future browser automation behind explicit approval steps.
+- Pause and ask in Discord when it encounters an unknown, ambiguous, changed,
+  or sensitive question.
+- Reuse stored answers only according to their approval and sensitivity rules.
+- Show every question and proposed answer in a final pre-submission review.
+- Keep browser automation behind the approval gates defined in the
+  [product requirements](docs/PRODUCT_REQUIREMENTS.md).
 
 ## Development Notes
 

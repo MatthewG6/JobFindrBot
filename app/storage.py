@@ -168,6 +168,10 @@ class JobStorage:
         self.notification_channels_table = self.db.table(
             "notification_channels"
         )
+        self.discord_interactions_table = self.db.table(
+            "discord_interactions"
+        )
+        self.discord_contexts_table = self.db.table("discord_contexts")
         self.schema_metadata_table = self.db.table("schema_metadata")
 
     def _ensure_schema(self) -> None:
@@ -593,6 +597,58 @@ class JobStorage:
     def clear_jobs(self) -> None:
         with self._access():
             self.jobs_table.truncate()
+
+    def claim_discord_interaction(self, interaction_id: str) -> bool:
+        with self._access():
+            interactions = Query()
+            if self.discord_interactions_table.contains(
+                interactions.interaction_id == interaction_id
+            ):
+                return False
+            self.discord_interactions_table.insert(
+                {
+                    "interaction_id": interaction_id,
+                    "claimed_at": utc_now().isoformat(),
+                }
+            )
+            return True
+
+    def save_discord_context(
+        self,
+        *,
+        message_id: str,
+        channel_id: int,
+        job_id: int | None = None,
+        application_id: int | None = None,
+    ) -> dict:
+        with self._access():
+            contexts = Query()
+            context = {
+                "message_id": message_id,
+                "channel_id": channel_id,
+                "job_id": job_id,
+                "application_id": application_id,
+                "updated_at": utc_now().isoformat(),
+            }
+            existing = self.discord_contexts_table.get(
+                contexts.message_id == message_id
+            )
+            if existing is None:
+                self.discord_contexts_table.insert(context)
+            else:
+                self.discord_contexts_table.update(
+                    context,
+                    contexts.message_id == message_id,
+                )
+            return context
+
+    def get_discord_context(self, message_id: str) -> dict | None:
+        with self._access():
+            contexts = Query()
+            context = self.discord_contexts_table.get(
+                contexts.message_id == message_id
+            )
+            return None if context is None else dict(context)
 
     def get_processed_email(self, message_id: str) -> dict | None:
         with self._access():

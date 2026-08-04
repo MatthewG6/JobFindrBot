@@ -8,3 +8,11 @@ safety:
   auto_apply: false
   browser_automation_enabled: false
   ai_scoring_enabled: false
+
+discord:
+  enabled: false
+  commands:
+    - status
+    - help
+    - test-notification
+  application_actions_enabled: false

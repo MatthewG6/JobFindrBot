@@ -10,3 +10,4 @@ google-auth-httplib2
 google-auth-oauthlib
 pytest
 httpx2
+discord.py>=2.7,<3
