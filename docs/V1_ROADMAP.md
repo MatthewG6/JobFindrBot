@@ -73,8 +73,8 @@ submitting anything without explicit approval.
 3. Build Scoring V2 dimensions, confidence, evidence, and version migration
 4. Build the labeling workflow and held-out scoring benchmark
 5. Add the focused local review and labeling dashboard
-6. Confirm and implement D015, including key recovery, backup purge, and its
-   sensitive-data restore drill
+6. Implement D015, including key recovery, backup purge, and its sensitive-data
+   restore drill
 7. Add the private application profile and approved document catalog
 8. Add structured answer memory, Discord non-sensitive question approvals, and
    owner-only local sensitive input

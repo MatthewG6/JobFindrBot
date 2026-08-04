@@ -134,7 +134,8 @@ remains in this file and links to the decision that replaced it.
 
 ## D015 - Sensitive application-memory lifecycle
 
-- Status: proposed; blocking D008-D010 implementation
+- Status: accepted on 2026-08-04; blocking D008-D010 implementation until its
+  prerequisites pass
 - Decision: Reusable application-profile and answer values must be encrypted at
   rest with a key held outside the data store, preferably macOS Keychain.
   Demographic, disability, veteran, background, signature, and legal-attestation
