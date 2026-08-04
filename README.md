@@ -234,11 +234,32 @@ matching non-spam messages from a seven-day catch-up window, verifies Google's
 authentication result, and sends new messages through the shared email-ingestion
 pipeline without changing Gmail.
 
+## Scheduled Scans
+
+The macOS launchd scheduler starts on login and wakes every 30 minutes. LinkedIn
+and Indeed alert emails are checked every cycle. Himalayas is checked by the same
+runner only when its 24-hour source interval is due.
+
+Generate the local LaunchAgent configuration with:
+
+```bash
+python scripts/install_launchd_scheduler.py
+```
+
+The installer reloads the LaunchAgent, starts it immediately, and waits for a
+successful background preflight. This preflight also detects macOS privacy
+restrictions that could block a background process from accessing the project
+under `Desktop`.
+
+The scheduled entry point is `scripts/run_scheduled_scan.py`. It uses the local
+read-only Gmail token without opening an interactive browser, prevents overlapping
+runs, stores source timing in `data/scheduler_state.json`, and writes local output
+under `logs/`.
+
 ## What This Does Not Do Yet
 
 - No real scraping.
 - No notifications.
-- No scheduling.
 - Gmail OAuth requires one-time local browser authorization.
 - No auto-apply behavior.
 - No browser automation.

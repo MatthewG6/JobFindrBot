@@ -18,3 +18,4 @@ secrets/
 credentials.json
 token.json
 .codex/
+logs/
