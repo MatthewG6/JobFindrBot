@@ -11,32 +11,17 @@ even when Matthew is the only person who merges it.
   branch and pull request.
 - **Hybrid Reviewer:** Read-only independent reviewer defined in
   `.kiro/agents/hybrid-reviewer.md`.
-- **QA agent:** Future read-only behavioral verifier. Until it exists, the
-  implementation agent prepares the QA plan and Matthew records the result.
+- **QA agent:** Read-only behavioral verifier that returns reproducible evidence
+  and does not repair its own findings.
 
 The implementation agent must not impersonate the Hybrid Reviewer or QA agent.
 Each gate should receive the same task and acceptance criteria but evaluate the
 change from its own role.
 
-## QA Agent Implementation Trigger
+## QA Agent Requirement
 
-The dedicated QA agent is intentionally deferred while the project remains a
-small backend MVP. Create `.kiro/agents/qa-agent.md` when work begins on the
-first substantial Discord integration feature, and do not merge that feature
-until the QA agent is available.
-
-The trigger includes any PR that introduces one or more of:
-
-- Discord bot authentication or authorization;
-- commands, buttons, modals, or confirmation prompts;
-- job notifications or application progress updates;
-- pause, resume, cancel, timeout, or retry behavior through Discord;
-- Discord event deduplication or recovery after restart;
-- an approval gate controlled through Discord.
-
-When the trigger is reached, the implementation plan must include creation of
-the QA agent before feature completion. The QA agent should be acceptance-
-criteria-driven, read-only, unable to repair defects, and required to return
+Independent adversarial QA is required for every major milestone. It is
+acceptance-criteria-driven, read-only, unable to repair defects, and returns
 `PASS`, `FAIL`, or `BLOCKED` with reproducible evidence.
 
 ## Branch and Pull Request Policy
@@ -79,7 +64,8 @@ Before requesting review, the implementation agent must:
 4. Confirm each acceptance criterion.
 5. Commit and push the branch.
 6. Open or update a draft pull request.
-7. Complete the review packet below.
+7. Wait for required CI checks to pass.
+8. Complete the review packet below.
 
 ### Required Review Packet
 
@@ -198,9 +184,6 @@ The QA agent does not repair defects. A FAIL returns to the implementation
 agent, followed by focused code re-review when the fix materially changes the
 implementation and then QA re-check.
 
-Until a dedicated QA agent exists, the implementation agent creates this test
-matrix and Matthew or safe automation executes it. Record the result in the PR.
-
 ## Phase 5: Merge Decision
 
 A PR may merge into `develop` only when:
@@ -217,6 +200,17 @@ unless it contains explicitly planned ongoing work.
 
 Promotion from `develop` to `main` should use a separate release PR with focused
 regression evidence.
+
+## Phase 6: Production Verification
+
+After merge to `develop`, deploy or reload the reviewed commit. Verify scheduler
+health, structured metrics, logs, migrations, backups, and any milestone-specific
+production behavior. A failed deployment or health gate requires a follow-up
+branch and pull request; the milestone remains open until production passes.
+
+Runtime work must not happen in the checkout used by the active scheduler. Until
+an isolated release checkout exists, stop the LaunchAgent before editing runtime
+files and restart it only after merge and successful CI.
 
 ## PR Summary Template
 

@@ -40,10 +40,19 @@ submitting anything without explicit approval.
 ### Review and application assistance
 
 - [x] Application state machine with separate start and submit approvals
+- [ ] Implement the sensitive-data encryption, retention, deletion, and redaction policy
+- [ ] Add a validated private application profile separate from scoring preferences
+- [ ] Catalog resume variants and other approved application documents
+- [ ] Store structured answers with sensitivity, context, provenance, and revisions
+- [ ] Support automatic, confirm-first, and never-reuse answer policies
+- [ ] Match questions by meaning and context with explicit confidence
 - [ ] Add a focused local review and labeling dashboard
+- [ ] Let users view, edit, retire, and delete stored answers
+- [ ] Review unknown questions through Discord and route sensitive input locally
 - [ ] Support approved Playwright assistance on selected employer ATS platforms
 - [ ] Reuse only reviewed, non-sensitive known answers
 - [ ] Pause on unknown, sensitive, authentication, CAPTCHA, and submission steps
+- [ ] Produce a complete pre-submission answer and document review package
 - [ ] Verify that no workflow can submit without explicit approval
 
 ### Release readiness
@@ -51,6 +60,7 @@ submitting anything without explicit approval.
 - [x] Owner-only OAuth, source, and Discord credential storage
 - [x] Schema version metadata and pre-migration backups
 - [x] Independent reviewer and adversarial QA gates for major milestones
+- [ ] Isolate the production scheduler checkout from runtime development changes
 - [ ] Add restore tooling and rehearse backup recovery
 - [ ] Reconcile README, screenshots, architecture, and setup instructions
 - [ ] Produce a redacted demo using fixture data
@@ -58,16 +68,26 @@ submitting anything without explicit approval.
 
 ## Ordered Backlog
 
-1. Employer-site resolver contracts, persistence, matching, and manual handoff
-2. Employer posting enrichment and read-only dynamic-page rendering
-3. Scoring V2 dimensions, confidence, evidence, and score-version migration
-4. Labeling workflow and held-out scoring benchmark
-5. Local review dashboard
-6. Approved ATS form-assistance adapters
-7. Restore drill, end-to-end release QA, and V1 documentation
+1. Expand official employer and ATS destination resolution
+2. Add read-only dynamic employer-page rendering
+3. Build Scoring V2 dimensions, confidence, evidence, and version migration
+4. Build the labeling workflow and held-out scoring benchmark
+5. Add the focused local review and labeling dashboard
+6. Implement D015, including key recovery, backup purge, and its sensitive-data
+   restore drill
+7. Add the private application profile and approved document catalog
+8. Add structured answer memory, Discord non-sensitive question approvals, and
+   owner-only local sensitive input
+9. Add approved ATS form-assistance adapters and final review package
+10. Rehearse restore, complete release QA, and publish V1 documentation
 
 ## Later Versions
 
-SQLite replaces TinyDB before multiple users, multiple worker processes, or a
-hosted dashboard. Multi-user accounts, cloud execution, and broad ATS coverage
-are explicitly outside V1.
+SQLite replaces TinyDB before multi-user, hosted, or materially
+higher-concurrency operation. Current local processes use cross-process locking;
+the planned local dashboard must use the existing application/storage boundary.
+Multi-user accounts, cloud execution, and broad ATS coverage are explicitly
+outside V1.
+
+Material scope and sequencing decisions are recorded in the
+[decision register](DECISIONS.md).
