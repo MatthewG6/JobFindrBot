@@ -1,36 +1,8 @@
 project:
-  name: Job Radar Assistant
+  name: Jobbot
   mode: local_personal_use
 
-targets:
-  roles:
-    - Junior Software Engineer
-    - New Grad Software Engineer
-    - Entry-Level Software Developer
-    - Application Developer
-    - Frontend Developer
-    - Full-stack Developer
-    - Java Developer
-    - React TypeScript Developer
-    - Junior AWS Cloud Developer
-  locations:
-    - Minnesota
-    - Twin Cities
-    - Rochester
-    - Remote
-    - Hybrid nearby
-
-penalties:
-  keywords:
-    - senior
-    - staff
-    - principal
-    - lead
-    - architect
-    - manager
-    - 5+ years
-    - contract only
-    - unpaid
+candidate_profile: credentials/candidate_profile.yaml
 
 safety:
   auto_apply: false

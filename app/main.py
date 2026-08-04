@@ -8,6 +8,7 @@ from app.candidates import (
     DEFAULT_APPLICATION_THRESHOLD,
     create_application_candidates,
 )
+from app.candidate_profile import default_candidate_profile
 from app.ingestion import ingest_job
 from app.models import (
     ApplicationStatus,
@@ -18,7 +19,8 @@ from app.models import (
 from app.scanner import scan_jobs
 from app.storage import JobStorage
 
-app = FastAPI(title="Job Radar Assistant")
+CANDIDATE_PROFILE = default_candidate_profile()
+app = FastAPI(title="Jobbot")
 
 
 def get_storage() -> JobStorage:
@@ -27,7 +29,7 @@ def get_storage() -> JobStorage:
 
 @app.get("/")
 def read_root() -> dict[str, str]:
-    return {"message": "Job Radar Assistant is running"}
+    return {"message": "Jobbot is running"}
 
 
 @app.get("/health")
@@ -102,7 +104,7 @@ def approve_application_candidate(
         ),
         storage,
         approval_kind="start",
-        approved_by="Matthew",
+        approved_by=CANDIDATE_PROFILE.approval_name,
         expected_status=ApplicationStatus.AWAITING_START_APPROVAL,
     )
 
@@ -138,7 +140,7 @@ def approve_application_submission(
         ),
         storage,
         approval_kind="submit",
-        approved_by="Matthew",
+        approved_by=CANDIDATE_PROFILE.approval_name,
         expected_status=ApplicationStatus.AWAITING_SUBMIT_APPROVAL,
     )
 

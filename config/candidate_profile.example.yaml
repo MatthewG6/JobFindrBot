@@ -1,0 +1,58 @@
+schema_version: 1
+profile_name: Local Candidate
+approval_name: Owner
+
+target_role_keywords:
+  - application developer
+  - entry level
+  - entry-level
+  - frontend
+  - front-end
+  - full stack
+  - full-stack
+  - junior
+  - new grad
+  - software engineer
+  - software developer
+
+target_technology_keywords:
+  - aws
+  - cloud
+  - java
+  - react
+  - typescript
+
+preferred_location_keywords:
+  - minneapolis
+  - minnesota
+  - remote
+  - rochester
+  - st. paul
+  - saint paul
+  - twin cities
+
+red_flag_keywords:
+  - architect
+  - contract only
+  - lead
+  - manager
+  - principal
+  - senior
+  - staff
+  - unpaid
+  - 5+ years
+  - 6+ years
+  - 7+ years
+  - 8+ years
+  - 9+ years
+  - 10+ years
+
+weights:
+  role_keyword: 15
+  technology_keyword: 8
+  location_keyword: 10
+  red_flag_keyword: -25
+
+thresholds:
+  review: 40
+  strong: 75

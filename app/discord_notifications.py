@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 import requests
 
 from app.candidates import qualifies_for_application
+from app.candidate_profile import default_candidate_profile
 from app.storage import JobStorage
 
 
@@ -21,7 +22,7 @@ DEFAULT_DISCORD_CREDENTIALS_PATH = (
     PROJECT_ROOT / "credentials" / "discord.json"
 )
 DISCORD_CHANNEL = "discord"
-DEFAULT_DISCORD_THRESHOLD = 40
+DEFAULT_DISCORD_THRESHOLD = default_candidate_profile().thresholds.review
 DEFAULT_MAX_NOTIFICATIONS = 10
 DEFAULT_RETRY_AFTER = 1800.0
 MAX_RETRY_AFTER = 604800.0

@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.gmail_client import DEFAULT_GMAIL_DB_PATH, GmailJobAlertClient
+from app.operational_metrics import append_scheduler_metric, scheduler_metric
 from app.discord_notifications import (
     DiscordNotConfigured,
     run_discord_notifications,
@@ -410,6 +411,14 @@ def print_summary(summary: dict) -> None:
     print(f"Source errors: {len(summary['errors'])}")
     for error in summary["errors"]:
         print(f"- {error['source']}: {error['error_type']}")
+    maintenance = summary.get("maintenance")
+    if maintenance is not None:
+        print(
+            "maintenance: "
+            f"schema={maintenance['schema_version']} "
+            f"backup_created={maintenance['backup_created']} "
+            f"backups_removed={maintenance['backups_removed']}"
+        )
 
 
 @contextmanager
@@ -431,6 +440,7 @@ def write_scheduler_health(
     success: bool,
     error_count: int,
     health_path: Path = DEFAULT_HEALTH_PATH,
+    warning_count: int = 0,
 ) -> None:
     write_scheduler_state(
         health_path,
@@ -439,6 +449,7 @@ def write_scheduler_health(
             "error_count": error_count,
             "install_nonce": os.environ.get("JOBBOT_SCHEDULER_INSTALL_NONCE"),
             "success": success,
+            "warning_count": warning_count,
         },
     )
 
@@ -448,16 +459,58 @@ def main() -> None:
         if not acquired:
             print("Jobbot scheduled scan skipped: another scan is running")
             return
+        started_at = datetime.now(UTC)
         try:
+            storage = JobStorage(DEFAULT_GMAIL_DB_PATH)
+            backup = storage.create_backup(now=started_at)
             summary = run_scheduled_scan(
+                storage=storage,
                 notification_runner=default_notification_runner,
             )
+            summary["maintenance"] = {
+                "schema_version": backup["schema_version"],
+                "backup_created": backup["created"],
+                "backups_removed": backup["removed"],
+            }
             print_summary(summary)
             success = not summary["errors"]
-            write_scheduler_health(success, len(summary["errors"]))
-        except Exception:
+        except Exception as error:
             write_scheduler_health(False, 1)
+            failure_summary = {
+                "gmail": None,
+                "sources": {},
+                "discord": None,
+                "errors": [
+                    {
+                        "source": "scheduler",
+                        "error_type": type(error).__name__,
+                    }
+                ],
+            }
+            try:
+                append_scheduler_metric(
+                    scheduler_metric(
+                        failure_summary,
+                        started_at,
+                        datetime.now(UTC),
+                    )
+                )
+            except Exception:
+                pass
             raise
+        warning_count = 0
+        try:
+            append_scheduler_metric(
+                scheduler_metric(summary, started_at, datetime.now(UTC))
+            )
+        except Exception as error:
+            warning_count = 1
+            print(f"metrics: warning={type(error).__name__}")
+        write_scheduler_health(
+            success,
+            len(summary["errors"]),
+            warning_count=warning_count,
+        )
         if not success:
             raise SystemExit(1)
 

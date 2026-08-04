@@ -1,6 +1,7 @@
-# Job Radar Assistant
+# Jobbot
 
-Job Radar Assistant is a personal job-search helper for finding, scoring, saving, and reviewing software engineering job postings.
+Jobbot is a local, human-in-the-loop job-search assistant for discovering,
+scoring, reviewing, and tracking software engineering opportunities.
 
 The project is designed to run locally on a personal computer. It is not an auto-apply bot, and it should never submit applications or answer sensitive application questions without explicit human approval.
 
@@ -68,7 +69,15 @@ Not planned for the early version:
 
 ## Current Status
 
-This repository has a small local MVP in place. It can accept job postings, score them with simple rules, detect duplicates, save them in TinyDB, and list saved jobs through FastAPI.
+Jobbot runs locally every 30 minutes. It ingests labeled LinkedIn and Indeed
+alerts from Gmail, scans compliant job APIs and employer boards at provider-safe
+intervals, deduplicates and scores jobs, and sends new high-fit results to
+Discord. Application records require separate approval to start and submit.
+
+Employer-site resolution, full-posting enrichment, Scoring V2, the review
+dashboard, and approved ATS assistance remain V1 work in progress. See the
+[V1 definition of done](docs/V1_ROADMAP.md) and
+[architecture](docs/ARCHITECTURE.md).
 
 ## Current MVP
 
@@ -304,6 +313,36 @@ read-only Gmail token without opening an interactive browser, prevents overlappi
 runs, stores source timing in `data/scheduler_state.json`, and writes local output
 under `logs/`.
 
+Every production scheduler run also creates at most one owner-only database backup
+per day under `data/backups/`, retains the newest 14 daily backups, and appends a
+sanitized structured health record to `data/metrics/scheduler_runs.jsonl`. TinyDB
+schema metadata is versioned; a separate snapshot is created before migrations.
+
+## Candidate Profile and Scoring Benchmark
+
+Personal role, technology, location, penalty, weight, and threshold settings live
+in the private `credentials/candidate_profile.yaml`, created from
+`config/candidate_profile.example.yaml`. The current values preserve legacy scoring
+behavior until Scoring V2 is implemented and calibrated.
+
+```bash
+cp config/candidate_profile.example.yaml credentials/candidate_profile.yaml
+chmod 600 credentials/candidate_profile.yaml
+```
+
+Create a private label file from `config/scoring_labels.example.json`, assign real
+jobs to `strong`, `review`, or `reject`, and keep calibration labels separate from
+the held-out validation labels. Evaluate aggregate metrics with:
+
+```bash
+.venv/bin/python scripts/run_scoring_benchmark.py \
+  --labels data/scoring_labels.json \
+  --split validation
+```
+
+Jobbot will not claim a scoring accuracy rate until enough real validation labels
+exist and the benchmark demonstrates it.
+
 ## Discord Notifications
 
 Discord is Jobbot's outbound review inbox. After every scheduled scan, Jobbot
@@ -377,19 +416,32 @@ delivered or retryable:
 ```text
 app/
   __init__.py
+  candidate_profile.py
+  discord_notifications.py
+  email_ingestion.py
+  job_sources.py
   main.py
   models.py
+  operational_metrics.py
+  scoring_benchmark.py
   storage.py
   scoring.py
   dedupe.py
   ingestion.py
   scanner.py
+config/
+  candidate_profile.example.yaml
+  employer_watchlist.json
+docs/
+  ARCHITECTURE.md
+  V1_ROADMAP.md
 data/
   .gitkeep
+scripts/
+  run_scheduled_scan.py
+  run_scoring_benchmark.py
 tests/
-  test_main.py
-  test_scoring.py
-  test_storage.py
+  fixtures/
 config.yaml
 requirements.txt
 README.md

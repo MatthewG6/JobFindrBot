@@ -1,0 +1,16 @@
+[
+  {
+    "job_id": 1,
+    "posting_fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "job_url": "https://example.com/jobs/1",
+    "label": "strong",
+    "split": "calibration"
+  },
+  {
+    "job_id": 2,
+    "posting_fingerprint": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+    "job_url": "https://example.com/jobs/2",
+    "label": "reject",
+    "split": "validation"
+  }
+]

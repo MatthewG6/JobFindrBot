@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app, get_storage
+from app.main import CANDIDATE_PROFILE, app, get_storage
 from app.models import ApplicationStatus
 from app.storage import JobStorage
 
@@ -175,7 +175,9 @@ def test_create_application_candidates_route_creates_records(
             "application_id": 1,
             "job_id": strong_job["id"],
             "status": "awaiting_start_approval",
-            "current_step": "Awaiting Matthew approval",
+            "current_step": (
+                f"Awaiting {CANDIDATE_PROFILE.approval_name} approval"
+            ),
             "job_title": "Strong Match",
             "company": "Example Company",
             "fit_score": 85,
@@ -281,9 +283,13 @@ def test_approve_and_complete_application_workflow(tmp_path: Path) -> None:
     assert completed_application["provider"] == "workday"
     assert len(completed_application["events"]) == 9
     assert completed_application["events"][1]["approval_kind"] == "start"
-    assert completed_application["events"][1]["approved_by"] == "Matthew"
+    assert completed_application["events"][1]["approved_by"] == (
+        CANDIDATE_PROFILE.approval_name
+    )
     assert completed_application["events"][7]["approval_kind"] == "submit"
-    assert completed_application["events"][7]["approved_by"] == "Matthew"
+    assert completed_application["events"][7]["approved_by"] == (
+        CANDIDATE_PROFILE.approval_name
+    )
 
 
 def test_reject_application_candidate(tmp_path: Path) -> None:

@@ -26,3 +26,14 @@ def test_fake_scan_full_local_mvp_workflow(tmp_path: Path) -> None:
     assert all("content_hash" in job for job in saved_jobs_after_second_run)
     assert all("fit_score" in job for job in saved_jobs_after_second_run)
     assert top_jobs[0]["fit_score"] >= top_jobs[1]["fit_score"]
+
+
+def test_release_foundation_files_are_checked_in() -> None:
+    required_paths = [
+        Path(".github/workflows/ci.yml"),
+        Path("config/candidate_profile.example.yaml"),
+        Path("docs/ARCHITECTURE.md"),
+        Path("docs/V1_ROADMAP.md"),
+    ]
+
+    assert all(path.is_file() for path in required_paths)

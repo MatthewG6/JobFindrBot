@@ -1,1 +1,1 @@
-"""Job Radar Assistant application package."""
+"""Jobbot application package."""

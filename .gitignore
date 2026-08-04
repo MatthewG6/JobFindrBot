@@ -10,6 +10,8 @@ env/
 
 data/*.json
 data/*.lock
+data/backups/
+data/metrics/
 !data/.gitkeep
 
 .env

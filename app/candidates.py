@@ -1,9 +1,11 @@
 from math import isfinite
 
+from app.candidate_profile import default_candidate_profile
 from app.storage import JobStorage
 
 
-DEFAULT_APPLICATION_THRESHOLD = 75
+CANDIDATE_PROFILE = default_candidate_profile()
+DEFAULT_APPLICATION_THRESHOLD = CANDIDATE_PROFILE.thresholds.strong
 
 
 def qualifies_for_application(value: object, threshold: int) -> bool:
@@ -39,7 +41,9 @@ def create_application_candidates(
         application = storage.create_application(
             job_id=job["id"],
             initial_message=message,
-            current_step="Awaiting Matthew approval",
+            current_step=(
+                f"Awaiting {CANDIDATE_PROFILE.approval_name} approval"
+            ),
         )
         created_applications.append(application)
         existing_job_ids.add(job["id"])

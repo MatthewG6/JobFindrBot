@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.candidates import create_application_candidates
+from app.candidates import CANDIDATE_PROFILE, create_application_candidates
 from app.storage import JobStorage
 
 
@@ -32,7 +32,9 @@ def test_high_scoring_job_creates_application_candidate(tmp_path: Path) -> None:
     assert len(created) == 1
     assert created[0]["job_id"] == high_score_job["id"]
     assert created[0]["status"] == "awaiting_start_approval"
-    assert created[0]["current_step"] == "Awaiting Matthew approval"
+    assert created[0]["current_step"] == (
+        f"Awaiting {CANDIDATE_PROFILE.approval_name} approval"
+    )
     assert created[0]["provider"] is None
 
 
