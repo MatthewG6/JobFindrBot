@@ -289,7 +289,14 @@ when exactly one official Greenhouse, Lever, or USAJOBS posting matches the same
 normalized company, title, and compatible location. Ambiguous matches require
 manual review; unresolved jobs remain pending for later scans.
 
-Run the deterministic resolver manually:
+For Adzuna, Remotive, and Himalayas only, the resolver also inspects a bounded,
+round-robin batch of provider pages. It accepts one exact external apply link or
+a validated redirect to a public employer/ATS destination. Requests use public
+DNS validation, pinned HTTPS connections, bounded bodies and redirects, and a
+six-hour retry cooldown. Access-controlled or JavaScript-only pages are retained
+for the read-only dynamic-rendering stage. LinkedIn and Indeed are never fetched.
+
+Run the resolver manually:
 
 ```bash
 python scripts/run_employer_resolution.py
@@ -304,8 +311,7 @@ python scripts/run_employer_resolution.py \
 ```
 
 Manual URLs must be public HTTPS destinations and cannot point back to LinkedIn,
-Indeed, or another discovery aggregator. This stage does not visit provider pages
-or launch Playwright.
+Indeed, or another discovery aggregator. This stage never launches Playwright.
 
 ### 5. Official posting enrichment
 
@@ -385,8 +391,10 @@ Every production scheduler run also creates at most one owner-only database back
 per day under `data/backups/`, retains the newest 14 daily backups, and appends a
 sanitized structured health record to `data/metrics/scheduler_runs.jsonl`. TinyDB
 schema metadata is versioned; a separate snapshot is created before migrations.
-Schema v3 also stores per-source posting snapshots so a later official-source
+Schema v3 stores per-source posting snapshots so a later official-source
 duplicate can enrich an email-discovered record without another network request.
+Schema v4 stores bounded provider-resolution attempts, cooldowns, and sanitized
+outcome types.
 
 ## Candidate Profile and Scoring Benchmark
 

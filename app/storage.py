@@ -28,7 +28,7 @@ from app.models import (
 
 
 DEFAULT_DB_PATH = Path("data/jobs.json")
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 MIN_ENRICHED_DESCRIPTION_CHARS = 20
 DEFAULT_BACKUP_RETENTION = 14
 _DATABASE_LOCKS: dict[Path, "DatabaseLock"] = {}
@@ -347,6 +347,32 @@ class JobStorage:
                     doc_ids=[job.doc_id],
                 )
             return
+        if version == 4:
+            for job in self.jobs_table.all():
+                data = dict(job)
+                attempt_count = data.get("resolution_attempt_count", 0)
+                if (
+                    isinstance(attempt_count, bool)
+                    or not isinstance(attempt_count, int)
+                    or attempt_count < 0
+                ):
+                    attempt_count = 0
+                self.jobs_table.update(
+                    {
+                        "resolution_attempt_count": attempt_count,
+                        "resolution_last_attempt_at": data.get(
+                            "resolution_last_attempt_at"
+                        ),
+                        "resolution_next_attempt_at": data.get(
+                            "resolution_next_attempt_at"
+                        ),
+                        "resolution_error_type": data.get(
+                            "resolution_error_type"
+                        ),
+                    },
+                    doc_ids=[job.doc_id],
+                )
+            return
         raise ValueError(f"Unsupported database migration: {version}")
 
     def schema_version(self) -> int:
@@ -660,6 +686,17 @@ class JobStorage:
             "resolution_method": "source_official" if resolved else None,
             "resolution_confidence": 1.0 if resolved else None,
             "resolved_at": now if resolved else None,
+            "resolution_attempt_count": data.get(
+                "resolution_attempt_count",
+                0,
+            ),
+            "resolution_last_attempt_at": data.get(
+                "resolution_last_attempt_at"
+            ),
+            "resolution_next_attempt_at": data.get(
+                "resolution_next_attempt_at"
+            ),
+            "resolution_error_type": data.get("resolution_error_type"),
         }
 
     def _register_job_link(
@@ -867,7 +904,53 @@ class JobStorage:
                     utc_now().isoformat() if status == "resolved" else None
                 ),
             }
+            if status == "resolved":
+                updates.update(
+                    {
+                        "resolution_next_attempt_at": None,
+                        "resolution_error_type": None,
+                    }
+                )
             self.jobs_table.update(updates, doc_ids=[job_id])
+            refreshed = self.jobs_table.get(doc_id=job_id)
+            return {**refreshed, "id": refreshed.doc_id}
+
+    def record_job_resolution_attempt(
+        self,
+        job_id: int,
+        *,
+        attempted_at: datetime,
+        next_attempt_at: datetime | None,
+        error_type: str | None,
+    ) -> dict:
+        if attempted_at.tzinfo is None or (
+            next_attempt_at is not None and next_attempt_at.tzinfo is None
+        ):
+            raise ValueError("Resolution attempt timestamps must be timezone-aware")
+        if error_type is not None and (
+            not isinstance(error_type, str) or not error_type.strip()
+        ):
+            raise ValueError("Resolution error type is invalid")
+        with self._access():
+            job = self.jobs_table.get(doc_id=job_id)
+            if job is None:
+                raise ValueError("Job does not exist")
+            count = job.get("resolution_attempt_count", 0)
+            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                count = 0
+            self.jobs_table.update(
+                {
+                    "resolution_attempt_count": count + 1,
+                    "resolution_last_attempt_at": attempted_at.isoformat(),
+                    "resolution_next_attempt_at": (
+                        next_attempt_at.isoformat()
+                        if next_attempt_at is not None
+                        else None
+                    ),
+                    "resolution_error_type": error_type,
+                },
+                doc_ids=[job_id],
+            )
             refreshed = self.jobs_table.get(doc_id=job_id)
             return {**refreshed, "id": refreshed.doc_id}
 

@@ -23,18 +23,22 @@ flowchart LR
     Apply --> Submit["Explicit submission approval"]
 ```
 
-The deterministic resolver is operational for captured official links, exact
-employer-board matches, and manual handoff. Static enrichment is operational for
-captured official payloads, Greenhouse and Lever APIs, and matching employer-page
-`JobPosting` JSON-LD. Read-only rendering of JavaScript-only pages, Scoring V2,
-the dashboard, and ATS assistance remain V1 work in progress. Discovery,
-ingestion, current scoring, Discord, persistence, scheduling, and application
-approval records are operational.
+The resolver is operational for captured official links, exact employer-board
+matches, bounded Adzuna/Remotive/Himalayas destination extraction, and manual
+handoff. Static enrichment is operational for captured official payloads,
+Greenhouse and Lever APIs, and matching employer-page `JobPosting` JSON-LD.
+Read-only rendering of JavaScript-only pages, Scoring V2, the dashboard, and ATS
+assistance remain V1 work in progress. Discovery, ingestion, current scoring,
+Discord, persistence, scheduling, and application approval records are
+operational.
 
 The resolver retains every incoming URL as provenance. LinkedIn, Indeed, and
 aggregator URLs remain discovery links; only validated public HTTPS employer/ATS
 links become application URLs. Automatic matching requires one unambiguous exact
-company/title match with a compatible location.
+company/title match with a compatible location. Approved aggregator resolution
+uses source-specific exact apply-link labels or validated redirects, round-robin
+batching, public-DNS checks, pinned HTTPS, and cooldowns. LinkedIn and Indeed are
+never requested.
 
 Enrichment runs only after resolution. API and static-page responses have bounded
 sizes, static requests pin TLS connections to a validated public address at each
@@ -77,7 +81,8 @@ independent uncoordinated database writer.
 
 Schema v3 retains each source's posting snapshot alongside canonical jobs and URL
 provenance. This allows richer official-board data to update a job first found in
-an email without losing where either record came from.
+an email without losing where either record came from. Schema v4 adds provider
+resolution attempt counts, timestamps, cooldowns, and sanitized outcome types.
 
 Backup SHA-256 sidecars detect accidental corruption. They are not authenticated
 and do not defend against a malicious local user who can rewrite both files; V1's

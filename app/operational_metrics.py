@@ -84,6 +84,34 @@ def scheduler_metric(
                     "jobs_manual_required",
                     0,
                 ),
+                "provider_jobs_attempted": resolver.get(
+                    "provider_jobs_attempted",
+                    0,
+                ),
+                "provider_jobs_resolved": resolver.get(
+                    "provider_jobs_resolved",
+                    0,
+                ),
+                "provider_jobs_deferred": resolver.get(
+                    "provider_jobs_deferred",
+                    0,
+                ),
+                "provider_jobs_dynamic_required": resolver.get(
+                    "provider_jobs_dynamic_required",
+                    0,
+                ),
+                "provider_jobs_ambiguous": resolver.get(
+                    "provider_jobs_ambiguous",
+                    0,
+                ),
+                "provider_jobs_manual_required": resolver.get(
+                    "provider_jobs_manual_required",
+                    0,
+                ),
+                "provider_jobs_failed": resolver.get(
+                    "provider_jobs_failed",
+                    0,
+                ),
                 "error_count": len(resolver.get("errors", [])),
             }
         ),
