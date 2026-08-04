@@ -19,6 +19,7 @@ LINKEDIN_JOB_COUNT = re.compile(
     r"^(\d+)\s+new\s+jobs?\s+match(?:es)?\s+your\s+preferences\.?$",
     re.IGNORECASE,
 )
+LINKEDIN_ALERT_CONFIRMATION_PREFIX = "Your job alert has been created:"
 LINKEDIN_LOCATION = re.compile(
     r"(?:\bremote\b|\bhybrid\b|\bunited states\b|"
     r"\bminnesota\b|\bwisconsin\b|,\s*[A-Z]{2}(?:\b|$)|\barea\b)",
@@ -78,7 +79,39 @@ def linkedin_alert_query(text: str) -> str | None:
         prefix = "Your job alert for "
         if clean_line.lower().startswith(prefix.lower()):
             return clean_line[len(prefix) :].strip() or None
+        if clean_line.lower().startswith(
+            LINKEDIN_ALERT_CONFIRMATION_PREFIX.lower()
+        ):
+            return (
+                clean_line[len(LINKEDIN_ALERT_CONFIRMATION_PREFIX) :]
+                .strip()
+                .removesuffix(".")
+                or None
+            )
     return None
+
+
+def linkedin_visible_job_count(text: str) -> int:
+    return sum(
+        line.strip().lower().startswith("view job:")
+        for line in text.splitlines()
+    )
+
+
+def linkedin_is_confirmation(text: str) -> bool:
+    return any(
+        line.strip().lower().startswith(
+            LINKEDIN_ALERT_CONFIRMATION_PREFIX.lower()
+        )
+        for line in text.splitlines()
+    )
+
+
+def linkedin_body_has_end_marker(text: str) -> bool:
+    return any(
+        line.strip().lower().startswith("see all jobs")
+        for line in text.splitlines()
+    )
 
 
 def canonicalize_linkedin_url(url: str) -> tuple[str, str | None]:
@@ -171,6 +204,15 @@ def indeed_alert_start(lines: list[str]) -> tuple[int, str | None, int | None]:
                 int(match.group(1)),
             )
     return len(lines), None, None
+
+
+def indeed_is_activation_notice(lines: list[str]) -> bool:
+    normalized = " ".join(lines).lower()
+    return (
+        "your job alert is active" in normalized
+        and "receive your first daily job alert" in normalized
+        and "when jobs become available" in normalized
+    )
 
 
 def split_indeed_company_location(value: str) -> tuple[str, str] | None:
@@ -341,7 +383,11 @@ def expected_job_count(message: JobAlertEmail, source: str) -> int | None:
         return None
 
     _, _, count = indeed_alert_start(lines)
-    return count
+    if count is not None:
+        return count
+    if indeed_is_activation_notice(lines):
+        return 0
+    return None
 
 
 def validate_parsed_job_count(
@@ -349,7 +395,25 @@ def validate_parsed_job_count(
     source: str,
     jobs: list[JobPosting],
 ) -> None:
+    text = email_body_text(message)
     expected_count = expected_job_count(message, source)
+    if source == "linkedin_email":
+        visible_count = linkedin_visible_job_count(text)
+        has_end_marker = linkedin_body_has_end_marker(text)
+        if (
+            expected_count is None
+            and has_end_marker
+            and linkedin_is_confirmation(text)
+        ):
+            expected_count = visible_count
+        elif (
+            expected_count is not None
+            and len(jobs) != expected_count
+            and has_end_marker
+            and len(jobs) == visible_count
+            and 0 < visible_count < expected_count
+        ):
+            return
     if expected_count is None:
         raise JobAlertParseError(
             f"Message {message.message_id} has no recognized job count"

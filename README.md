@@ -217,17 +217,29 @@ Messages must carry the expected Gmail label and a passing Google-recorded DMARC
 result. Provider links are restricted to HTTPS URLs on the expected domain;
 opaque Indeed email redirects are replaced with token-free Indeed search URLs.
 
-This milestone does not connect to Gmail yet. The next stage will use a local
-Google OAuth client with the read-only Gmail scope to fetch messages from the
-`Jobbot-LinkedIn` and `Jobbot-Indeed` labels. OAuth credentials and tokens are
-excluded from Git.
+The app includes a local Google OAuth adapter that uses the read-only Gmail
+scope to fetch messages from the `Jobbot-LinkedIn` and `Jobbot-Indeed` labels.
+OAuth credentials and tokens are excluded from Git.
+
+The local Gmail adapter can be run with:
+
+```bash
+python scripts/run_gmail_scan.py
+```
+
+On its first run, Google opens a browser consent flow for the read-only Gmail
+scope. The resulting refresh token is stored under `credentials/` with
+owner-only permissions. The adapter resolves the two Jobbot labels, reads only
+matching non-spam messages from a seven-day catch-up window, verifies Google's
+authentication result, and sends new messages through the shared email-ingestion
+pipeline without changing Gmail.
 
 ## What This Does Not Do Yet
 
 - No real scraping.
 - No notifications.
 - No scheduling.
-- No Gmail OAuth connection yet.
+- Gmail OAuth requires one-time local browser authorization.
 - No auto-apply behavior.
 - No browser automation.
 - No AI scoring.

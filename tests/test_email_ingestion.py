@@ -309,6 +309,138 @@ def test_partial_parse_is_retryable_instead_of_marked_processed(
     assert len(storage.list_processed_emails()) == 1
 
 
+def test_linkedin_confirmation_uses_visible_job_count(tmp_path: Path) -> None:
+    body = """Your job alert has been created: Software Engineer in Minnesota.
+Software Engineer I
+Example Systems
+Minneapolis, MN
+View job: https://www.linkedin.com/jobs/view/1112223334/
+---------------------------------------------------------
+See all jobs: https://www.linkedin.com/jobs/search-results/?keywords=software
+"""
+    message = linkedin_email().model_copy(
+        update={
+            "message_id": "fake-linkedin-confirmation",
+            "text_body": body,
+        }
+    )
+
+    storage = JobStorage(tmp_path / "jobs.json")
+    result = ingest_job_alert_email(message, storage)
+
+    assert result["processed"] is True
+    assert result["parsed_count"] == 1
+    assert storage.list_jobs()[0]["alert_query"] == (
+        "Software Engineer in Minnesota"
+    )
+
+
+def test_complete_linkedin_email_accepts_provider_count_mismatch(
+    tmp_path: Path,
+) -> None:
+    body = LINKEDIN_FIXTURE.read_text(encoding="utf-8").replace(
+        "2 new jobs match your preferences.",
+        "7 new jobs match your preferences.",
+    )
+    message = linkedin_email().model_copy(
+        update={
+            "message_id": "fake-linkedin-count-mismatch",
+            "text_body": body,
+        }
+    )
+
+    result = ingest_job_alert_email(
+        message,
+        JobStorage(tmp_path / "jobs.json"),
+    )
+
+    assert result["processed"] is True
+    assert result["parsed_count"] == 2
+
+
+def test_linkedin_footer_without_recognized_heading_is_retryable(
+    tmp_path: Path,
+) -> None:
+    message = linkedin_email().model_copy(
+        update={
+            "message_id": "fake-linkedin-footer-only",
+            "text_body": (
+                "Unrecognized LinkedIn message\n"
+                "See all jobs: https://www.linkedin.com/jobs/search-results/\n"
+            ),
+        }
+    )
+    storage = JobStorage(tmp_path / "jobs.json")
+
+    with pytest.raises(JobAlertParseError, match="no recognized job count"):
+        ingest_job_alert_email(message, storage)
+
+    assert storage.list_processed_emails() == []
+
+
+def test_linkedin_more_visible_jobs_than_advertised_is_retryable(
+    tmp_path: Path,
+) -> None:
+    body = LINKEDIN_FIXTURE.read_text(encoding="utf-8").replace(
+        "2 new jobs match your preferences.",
+        "1 new job matches your preferences.",
+    )
+    message = linkedin_email().model_copy(
+        update={
+            "message_id": "fake-linkedin-extra-visible-job",
+            "text_body": body,
+        }
+    )
+    storage = JobStorage(tmp_path / "jobs.json")
+
+    with pytest.raises(
+        JobAlertParseError,
+        match="advertised 1 jobs but parsed 2",
+    ):
+        ingest_job_alert_email(message, storage)
+
+    assert storage.list_processed_emails() == []
+
+
+def test_indeed_activation_notice_is_processed_as_zero_jobs(
+    tmp_path: Path,
+) -> None:
+    message = indeed_email().model_copy(
+        update={
+            "message_id": "fake-indeed-activation",
+            "text_body": (
+                "Your job alert is active\n\n"
+                "You'll receive your first daily job alert when jobs become "
+                "available.\n"
+            ),
+        }
+    )
+
+    storage = JobStorage(tmp_path / "jobs.json")
+    result = ingest_job_alert_email(message, storage)
+
+    assert result["processed"] is True
+    assert result["parsed_count"] == 0
+    assert storage.list_jobs() == []
+
+
+def test_indeed_active_heading_alone_is_not_a_zero_job_notice(
+    tmp_path: Path,
+) -> None:
+    message = indeed_email().model_copy(
+        update={
+            "message_id": "fake-indeed-incomplete-activation",
+            "text_body": "Your job alert is active\nUnrecognized content\n",
+        }
+    )
+    storage = JobStorage(tmp_path / "jobs.json")
+
+    with pytest.raises(JobAlertParseError, match="no recognized job count"):
+        ingest_job_alert_email(message, storage)
+
+    assert storage.list_processed_emails() == []
+
+
 def test_recognized_zero_job_alert_is_marked_processed(tmp_path: Path) -> None:
     storage = JobStorage(tmp_path / "jobs.json")
     message = linkedin_email().model_copy(
