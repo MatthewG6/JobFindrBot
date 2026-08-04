@@ -2,7 +2,7 @@
 
 ## Product Vision
 
-Job Radar Assistant is a Discord-operated job discovery and application
+Jobbot is a Discord-operated job discovery and application
 assistant. Its purpose is to help Matthew find and apply to newly posted jobs
 quickly while he is away from his computer.
 
@@ -38,7 +38,7 @@ confirmation, or missing information is required.
 3. Notify Matthew in Discord when a promising new job is found, including the
    company, role, location, source, posting age, fit score, important reasons,
    red flags, and link.
-4. Ask whether to begin the application when approval is required.
+4. Ask for explicit approval before beginning application assistance.
 5. Open and progress through the application while posting meaningful Discord
    updates, such as starting, signing in, entering a new section, waiting for
    input, recovering from an error, or becoming ready for review.
@@ -46,14 +46,17 @@ confirmation, or missing information is required.
    confident semantic match and the context has not changed.
 7. For an unknown, ambiguous, changed, or sensitive question:
    - pause the application;
-   - send the exact question and relevant context to Discord;
-   - propose an answer only when useful and label it as a proposal;
-   - wait for Matthew to answer or approve;
-   - record the approved answer and its provenance for possible future reuse.
-8. When all fields are complete, send a final review package containing:
+   - send the exact question and redacted context to Discord;
+   - for non-sensitive questions, propose an answer only when useful, label it
+     as a proposal, and wait for Matthew to answer or approve;
+   - for sensitive questions, route raw input to an owner-only local surface;
+   - record only answers permitted by the approved sensitivity and reuse policy.
+8. When all fields are complete, prepare an owner-only local review package and
+   send a redacted Discord summary containing:
    - the job and company;
    - the resume and other documents selected;
-   - every application question and proposed answer;
+   - every application question and proposed answer, with sensitive values
+     visible only in the local package;
    - which answers were reused, newly supplied, or generated and approved;
    - any unresolved warnings, unusual terms, or assistant uncertainty.
 9. Wait for explicit final approval. Submission is a separate action from
@@ -72,6 +75,8 @@ confirmation, or missing information is required.
 - The assistant should acknowledge commands and report failures instead of
   silently retrying indefinitely.
 - Duplicate notifications and repeated questions should be avoided.
+- Discord must not request, receive, or echo a raw sensitive answer. It may link
+  the owner to an owner-only local input surface and report only redacted state.
 - If Discord is unavailable, the assistant must pause at the next decision or
   submission boundary rather than make decisions on Matthew's behalf.
 
@@ -98,7 +103,7 @@ to view, correct, retire, or delete stored answers.
 
 At minimum, the workflow must stop for:
 
-- approval to begin an application when configured;
+- approval to begin application assistance;
 - any unrecognized or ambiguous application question;
 - sensitive or legally consequential questions as described above;
 - material changes to resumes, cover letters, or claims about experience;
@@ -111,10 +116,15 @@ Approval for one gate must never be interpreted as approval for later gates.
 ## Audit and Recovery
 
 For each application, store a timestamped event history containing progress,
-questions, answers, approvals, edits, errors, retries, and submission outcome.
+questions, non-sensitive answers, approvals, edits, errors, retries, and
+submission outcome. Sensitive-answer events retain the question, category,
+approval outcome, approver, and time but redact the raw value. A sensitive value
+needed to resume after restart must be requested again rather than recovered from
+routine audit history.
 The workflow should resume safely after a restart without duplicating an
 application or losing a pending question. Secrets, credentials, and unnecessary
-sensitive data must not appear in routine Discord messages or logs.
+sensitive data must not appear in Discord messages or logs. Raw sensitive
+answers must never pass through Discord.
 
 ## Explicit Non-Goals
 
@@ -134,9 +144,11 @@ only genuinely new questions, review every proposed answer, and explicitly
 approve submission. The assistant reduces repetitive work without taking final
 decision-making away from him.
 
-## Development Gate: QA Agent
+## Development Quality Gate
 
-A dedicated QA agent is not required for the current backend MVP. It must be
-implemented when development begins on the first substantial Discord feature
-and before that feature merges into `develop`. The detailed trigger and review
-integration are defined in `.kiro/steering/review-workflow.md`.
+Every major milestone requires focused tests, the full automated suite, and a
+safe local preflight before review. The scoped branch is pushed to a draft pull
+request and must pass GitHub CI before independent review and adversarial QA.
+After approval and merge, production deployment and health verification close
+the milestone. The detailed sequence is defined in
+`.kiro/steering/review-workflow.md`.

@@ -6,12 +6,20 @@
 flowchart LR
     Gmail["LinkedIn and Indeed email alerts"] --> Ingest["Validate and ingest"]
     APIs["Public APIs and employer boards"] --> Ingest
-    Ingest --> Resolve["Employer-site resolver"]
+    Ingest --> InitialScore["Initial scoring"]
+    InitialScore --> Resolve["Employer-site resolver"]
     Resolve --> Enrich["Official posting enrichment"]
-    Enrich --> Score["Scoring and confidence"]
-    Score --> Discord["Discord review inbox"]
-    Score --> Review["Human review"]
+    Enrich --> Rescore["Enriched rescoring"]
+    InitialScore --> Discord["Discord review inbox"]
+    Rescore --> Discord
+    InitialScore --> Review["Human review"]
+    Rescore --> Review
+    Profile["Application profile and documents"] --> Apply
+    Answers["Approved answer memory"] --> Apply
     Review --> Apply["Approved ATS assistance"]
+    Apply --> Questions["Unknown or sensitive questions"]
+    Questions --> Local["Owner-only sensitive input"]
+    Questions --> Discord["Redacted review state"]
     Apply --> Submit["Explicit submission approval"]
 ```
 
@@ -36,6 +44,17 @@ reruns deterministic scoring. Transient requests are deferred for retry;
 terminal payload errors require manual review, and pages without unique static
 posting data are routed to the future dynamic-page stage.
 
+## Application Memory
+
+Application memory is planned but not yet operational. It will be separate from
+job-scoring preferences and will contain a validated personal application
+profile, approved document catalog, and structured answer library. Answers retain
+their original wording, normalized intent, sensitivity, context, approval,
+reuse policy, and revision history. Unknown or sensitive questions pause the
+workflow. Discord carries review state, but raw sensitive values are entered
+only through an owner-only local surface; chat history alone is never treated as
+an approved answer source.
+
 ## Trust Boundaries
 
 - LinkedIn and Indeed are discovery and email-notification providers only.
@@ -48,10 +67,13 @@ posting data are routed to the future dynamic-page stage.
 
 ## Persistence
 
-TinyDB is the V1 single-user store. Every database carries a schema version.
-Migrations create an owner-only snapshot before writing, and the scheduler creates
-one retained daily backup. SQLite is the planned V2 persistence boundary before
-multi-process or multi-user operation.
+TinyDB is the V1 single-user store. Local Jobbot entry points serialize access
+through cross-process locking and atomic file replacement. Every database carries
+a schema version. Migrations create an owner-only snapshot before writing, and
+the scheduler creates one retained daily backup. SQLite is required before
+multi-user, hosted, or materially higher-concurrency operation. A local dashboard
+must use the existing application/storage boundary rather than become an
+independent uncoordinated database writer.
 
 Schema v3 retains each source's posting snapshot alongside canonical jobs and URL
 provenance. This allows richer official-board data to update a job first found in
@@ -63,6 +85,13 @@ security boundary is the operating-system account and owner-only file permission
 
 ## Quality Gates
 
-Every major milestone requires focused tests, the full automated suite,
-independent review, adversarial QA, a real local preflight, and production health
-verification before commit and push.
+Before review, every major milestone requires focused tests, the full automated
+suite, and a safe local preflight. The change is committed to a scoped branch,
+pushed to a draft pull request, and must pass GitHub CI before independent code
+review and adversarial QA. After approval and merge to `develop`, production
+deployment and health verification close the milestone. Until the scheduler has
+an isolated release checkout, runtime development requires stopping the
+LaunchAgent before edits and restarting it only after merge and passing CI.
+
+Material decisions and changes to these boundaries are retained in the
+[decision register](DECISIONS.md).

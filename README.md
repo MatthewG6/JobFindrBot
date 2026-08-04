@@ -92,7 +92,9 @@ submit.
 Read-only enrichment for JavaScript-only pages, Scoring V2, the review
 dashboard, and approved ATS assistance remain V1 work in progress. See the
 [V1 definition of done](docs/V1_ROADMAP.md) and
-[architecture](docs/ARCHITECTURE.md).
+[architecture](docs/ARCHITECTURE.md). Product, architecture, safety, and
+sequencing choices are retained in the
+[decision register](docs/DECISIONS.md).
 
 ## Current MVP
 
@@ -416,8 +418,11 @@ exist and the benchmark demonstrates it.
 Discord is Jobbot's outbound review inbox. After every scheduled scan, Jobbot
 posts newly discovered jobs with a fit score of at least 40 to a private Discord
 channel. Each message includes the role, company, location, source, fit reasons,
-watch-outs, salary when available, and a public job link. Discord does not approve,
-answer, or submit applications in V1.
+watch-outs, salary when available, and a public job link. The current webhook is
+outbound-only and cannot approve, answer, or submit applications. Planned V1
+Discord interactions will collect reviewed non-sensitive answers and application
+approvals; raw sensitive answers will be routed to an owner-only local surface, and
+submission remains a separate, explicit application-specific approval.
 
 Create and connect the webhook:
 
@@ -543,6 +548,7 @@ config/
   employer_watchlist.json
 docs/
   ARCHITECTURE.md
+  DECISIONS.md
   PRODUCT_REQUIREMENTS.md
   V1_ROADMAP.md
 data/
@@ -590,10 +596,12 @@ This project should:
 - Never submit a job application without explicit, application-specific final
   approval.
 - Never guess legally sensitive answers.
-- Pause and ask in Discord when it encounters an unknown, ambiguous, changed,
-  or sensitive question.
+- Pause on unknown, ambiguous, changed, or sensitive questions. Discord may
+  handle non-sensitive answers and redacted review state; raw sensitive answers
+  use an owner-only local surface.
 - Reuse stored answers only according to their approval and sensitivity rules.
-- Show every question and proposed answer in a final pre-submission review.
+- Show every question and proposed answer in an owner-only final pre-submission
+  review, with only a redacted summary sent to Discord.
 - Keep browser automation behind the approval gates defined in the
   [product requirements](docs/PRODUCT_REQUIREMENTS.md).
 
