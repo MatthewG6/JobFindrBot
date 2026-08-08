@@ -64,6 +64,7 @@ The assistant should avoid or heavily penalize postings that are clearly not a g
 - TinyDB for local JSON-like storage
 - Pydantic for data validation
 - BeautifulSoup and requests for API response normalization
+- Playwright with pinned Chromium for approved read-only dynamic pages
 - pytest for tests
 - macOS launchd for scheduled scans
 - Discord incoming webhook for high-fit job notifications
@@ -75,7 +76,7 @@ Not planned for the early version:
 - Docker
 - PostgreSQL
 - AI-based scoring
-- Unsupervised browser automation
+- Interactive or unsupervised application-form browser automation
 - Auto-apply behavior
 
 ## Current Status
@@ -85,12 +86,12 @@ alerts from Gmail, scans compliant job APIs and employer boards at provider-safe
 intervals, preserves every source link, resolves high-confidence matches to
 official application URLs, scores jobs, and sends new high-fit results to
 Discord. Resolved postings are enriched from captured official payloads,
-Greenhouse and Lever APIs, or static employer-page `JobPosting` JSON-LD before
-they are rescored. Application records require separate approval to start and
-submit.
+Greenhouse and Lever APIs, static employer-page `JobPosting` JSON-LD, or an
+approved read-only dynamic fallback before they are rescored. Application
+records require separate approval to start and submit.
 
-Read-only enrichment for JavaScript-only pages, Scoring V2, the review
-dashboard, and approved ATS assistance remain V1 work in progress. See the
+Scoring V2, the review dashboard, and approved ATS assistance remain V1 work in
+progress. See the
 [V1 definition of done](docs/V1_ROADMAP.md) and
 [architecture](docs/ARCHITECTURE.md). Product, architecture, safety, and
 sequencing choices are retained in the
@@ -293,8 +294,9 @@ For Adzuna, Remotive, and Himalayas only, the resolver also inspects a bounded,
 round-robin batch of provider pages. It accepts one exact external apply link or
 a validated redirect to a public employer/ATS destination. Requests use public
 DNS validation, pinned HTTPS connections, bounded bodies and redirects, and a
-six-hour retry cooldown. Access-controlled or JavaScript-only pages are retained
-for the read-only dynamic-rendering stage. LinkedIn and Indeed are never fetched.
+six-hour retry cooldown. Access-controlled or JavaScript-only pages are forwarded
+to the bounded read-only dynamic-rendering stage. LinkedIn and Indeed are never
+fetched.
 
 Run the resolver manually:
 
@@ -330,10 +332,37 @@ Run one bounded enrichment batch manually:
 ```
 
 Pages without one unique static posting are marked `dynamic_required` for the
-future read-only Playwright stage. Invalid or mismatched payloads require manual
-review; only transient request failures retry after 24 hours.
+read-only Playwright stage. Invalid or mismatched payloads require manual review;
+only transient request failures retry after 24 hours.
 
-### 6. Job alert email ingestion foundation
+### 6. Read-only dynamic rendering
+
+Install the pinned Chromium build after installing Python dependencies:
+
+```bash
+.venv/bin/python -m playwright install chromium
+```
+
+The dynamic resolver handles only Adzuna, Remotive, and Himalayas pages already
+classified as `DynamicPageRequired`. Employer-page enrichment additionally
+requires the destination domain in `config/dynamic_render_allowlist.json`; the
+default list is empty. LinkedIn and Indeed are rejected even if added to that
+file.
+
+Run the bounded dynamic stages manually:
+
+```bash
+.venv/bin/python scripts/run_dynamic_rendering.py
+```
+
+Each page receives a fresh non-persistent browser context. Jobbot performs no
+clicks, typing, authentication, downloads, or submissions. It permits only
+same-host GET document/script/XHR/fetch requests, pins Chromium to a validated
+public address, blocks other browser communication APIs and resource classes,
+enforces an eight-second DNS-and-browser process deadline, and accepts only one
+exact apply link or one identity-matching rendered `JobPosting` payload.
+
+### 7. Job alert email ingestion foundation
 
 The app includes parsers for the plain-text MIME parts of LinkedIn and Indeed
 job-alert emails. Parsed cards are normalized into `JobPosting` records and use
@@ -395,6 +424,7 @@ Schema v3 stores per-source posting snapshots so a later official-source
 duplicate can enrich an email-discovered record without another network request.
 Schema v4 stores bounded provider-resolution attempts, cooldowns, and sanitized
 outcome types.
+Schema v5 stores separate dynamic-resolution attempts and cooldowns.
 
 ## Candidate Profile and Scoring Benchmark
 
@@ -489,7 +519,7 @@ delivered or retryable:
 - No Discord approval commands or interactive application controls.
 - Gmail OAuth requires one-time local browser authorization.
 - No auto-apply behavior.
-- No browser automation.
+- No interactive application-form browser automation.
 - No AI scoring.
 
 ## Discord Foundation
@@ -537,6 +567,7 @@ app/
   discord_config.py
   discord_notifications.py
   discord_service.py
+  dynamic_rendering.py
   email_ingestion.py
   employer_resolver.py
   job_enrichment.py
@@ -553,6 +584,7 @@ app/
   scanner.py
 config/
   candidate_profile.example.yaml
+  dynamic_render_allowlist.json
   employer_watchlist.json
 docs/
   ARCHITECTURE.md
@@ -563,6 +595,7 @@ data/
   .gitkeep
 scripts/
   run_discord_bot.py
+  run_dynamic_rendering.py
   run_employer_resolution.py
   run_job_enrichment.py
   run_scheduled_scan.py
@@ -581,6 +614,7 @@ Install dependencies:
 
 ```bash
 pip install -r requirements.txt
+python -m playwright install chromium
 ```
 
 Run the FastAPI app:

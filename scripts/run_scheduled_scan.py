@@ -16,6 +16,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.gmail_client import DEFAULT_GMAIL_DB_PATH, GmailJobAlertClient
 from app.employer_resolver import resolve_employer_sites
+from app.dynamic_rendering import (
+    enrich_dynamic_jobs,
+    resolve_dynamic_provider_sites,
+)
 from app.job_enrichment import enrich_resolved_jobs
 from app.operational_metrics import append_scheduler_metric, scheduler_metric
 from app.discord_notifications import (
@@ -47,6 +51,7 @@ SourceRunner = Callable[[JobStorage], dict]
 NotificationRunner = Callable[[JobStorage], dict]
 ResolverRunner = Callable[[JobStorage], dict]
 EnrichmentRunner = Callable[[JobStorage], dict]
+DynamicRunner = Callable[[JobStorage], dict]
 
 
 def default_source_runners() -> dict[str, SourceRunner]:
@@ -284,6 +289,64 @@ def validate_enrichment_summary(summary: object) -> dict:
     return summary
 
 
+def validate_dynamic_resolution_summary(summary: object) -> dict:
+    if not isinstance(summary, dict) or not isinstance(summary.get("errors"), list):
+        raise ValueError("Dynamic resolver returned an invalid summary")
+    for key in (
+        "jobs_eligible",
+        "jobs_attempted",
+        "jobs_resolved",
+        "jobs_deferred",
+        "jobs_ambiguous",
+        "jobs_manual_required",
+        "jobs_failed",
+    ):
+        required_nonnegative_int(summary, key)
+    if summary["jobs_attempted"] + summary["jobs_deferred"] != summary[
+        "jobs_eligible"
+    ]:
+        raise ValueError("Dynamic resolver eligibility counts do not balance")
+    outcomes = (
+        summary["jobs_resolved"]
+        + summary["jobs_ambiguous"]
+        + summary["jobs_manual_required"]
+        + summary["jobs_failed"]
+    )
+    if outcomes != summary["jobs_attempted"]:
+        raise ValueError("Dynamic resolver attempt counts do not balance")
+    return summary
+
+
+def validate_dynamic_enrichment_summary(summary: object) -> dict:
+    if not isinstance(summary, dict) or not isinstance(summary.get("errors"), list):
+        raise ValueError("Dynamic enrichment returned an invalid summary")
+    for key in (
+        "jobs_eligible",
+        "jobs_attempted",
+        "jobs_enriched",
+        "jobs_deferred",
+        "jobs_unapproved",
+        "jobs_manual_required",
+        "jobs_failed",
+    ):
+        required_nonnegative_int(summary, key)
+    accounted = (
+        summary["jobs_attempted"]
+        + summary["jobs_deferred"]
+        + summary["jobs_unapproved"]
+    )
+    if accounted != summary["jobs_eligible"]:
+        raise ValueError("Dynamic enrichment eligibility counts do not balance")
+    outcomes = (
+        summary["jobs_enriched"]
+        + summary["jobs_manual_required"]
+        + summary["jobs_failed"]
+    )
+    if outcomes != summary["jobs_attempted"]:
+        raise ValueError("Dynamic enrichment attempt counts do not balance")
+    return summary
+
+
 def default_gmail_runner(storage: JobStorage) -> dict:
     client = GmailJobAlertClient.from_local_oauth(allow_interactive=False)
     return run_gmail_scan(storage=storage, client=client)
@@ -301,6 +364,14 @@ def default_enrichment_runner(storage: JobStorage) -> dict:
     return enrich_resolved_jobs(storage)
 
 
+def default_dynamic_resolution_runner(storage: JobStorage) -> dict:
+    return resolve_dynamic_provider_sites(storage)
+
+
+def default_dynamic_enrichment_runner(storage: JobStorage) -> dict:
+    return enrich_dynamic_jobs(storage)
+
+
 def run_scheduled_scan(
     *,
     storage: JobStorage | None = None,
@@ -311,6 +382,12 @@ def run_scheduled_scan(
     himalayas_runner: SourceRunner | None = None,
     resolver_runner: ResolverRunner | None = default_resolver_runner,
     enrichment_runner: EnrichmentRunner | None = default_enrichment_runner,
+    dynamic_resolution_runner: DynamicRunner | None = (
+        default_dynamic_resolution_runner
+    ),
+    dynamic_enrichment_runner: DynamicRunner | None = (
+        default_dynamic_enrichment_runner
+    ),
     notification_runner: NotificationRunner | None = None,
 ) -> dict:
     storage = storage or JobStorage(DEFAULT_GMAIL_DB_PATH)
@@ -342,7 +419,9 @@ def run_scheduled_scan(
         "gmail": None,
         "sources": {},
         "resolver": None,
+        "dynamic_resolution": None,
         "enrichment": None,
+        "dynamic_enrichment": None,
         "discord": None,
         "errors": errors,
     }
@@ -440,6 +519,28 @@ def run_scheduled_scan(
                 {"source": "resolver", "error_type": type(error).__name__}
             )
 
+    if dynamic_resolution_runner is not None:
+        try:
+            dynamic_resolution_summary = validate_dynamic_resolution_summary(
+                dynamic_resolution_runner(storage)
+            )
+            summary["dynamic_resolution"] = dynamic_resolution_summary
+            if dynamic_resolution_summary["errors"]:
+                errors.append(
+                    {
+                        "source": "dynamic_resolution",
+                        "error_type": "DynamicResolutionItemErrors",
+                    }
+                )
+        except Exception as error:
+            summary["dynamic_resolution"] = {"status": "failed"}
+            errors.append(
+                {
+                    "source": "dynamic_resolution",
+                    "error_type": type(error).__name__,
+                }
+            )
+
     if enrichment_runner is not None:
         try:
             enrichment_summary = validate_enrichment_summary(
@@ -457,6 +558,28 @@ def run_scheduled_scan(
             summary["enrichment"] = {"status": "failed"}
             errors.append(
                 {"source": "enrichment", "error_type": type(error).__name__}
+            )
+
+    if dynamic_enrichment_runner is not None:
+        try:
+            dynamic_enrichment_summary = validate_dynamic_enrichment_summary(
+                dynamic_enrichment_runner(storage)
+            )
+            summary["dynamic_enrichment"] = dynamic_enrichment_summary
+            if dynamic_enrichment_summary["errors"]:
+                errors.append(
+                    {
+                        "source": "dynamic_enrichment",
+                        "error_type": "DynamicEnrichmentItemErrors",
+                    }
+                )
+        except Exception as error:
+            summary["dynamic_enrichment"] = {"status": "failed"}
+            errors.append(
+                {
+                    "source": "dynamic_enrichment",
+                    "error_type": type(error).__name__,
+                }
             )
 
     if notification_runner is not None:
@@ -529,6 +652,22 @@ def print_summary(summary: dict) -> None:
             f"errors={len(resolver['errors'])}"
         )
 
+    dynamic_resolution = summary.get("dynamic_resolution")
+    if dynamic_resolution is None:
+        print("dynamic resolution: disabled")
+    elif dynamic_resolution == {"status": "failed"}:
+        print("dynamic resolution: failed")
+    else:
+        print(
+            "dynamic resolution: "
+            f"eligible={dynamic_resolution['jobs_eligible']} "
+            f"attempted={dynamic_resolution['jobs_attempted']} "
+            f"resolved={dynamic_resolution['jobs_resolved']} "
+            f"deferred={dynamic_resolution['jobs_deferred']} "
+            f"manual={dynamic_resolution['jobs_manual_required']} "
+            f"failed={dynamic_resolution['jobs_failed']}"
+        )
+
     enrichment = summary.get("enrichment")
     if enrichment is None:
         print("enrichment: disabled")
@@ -545,6 +684,23 @@ def print_summary(summary: dict) -> None:
             f"manual={enrichment['jobs_manual_required']} "
             f"failed={enrichment['jobs_failed']} "
             f"errors={len(enrichment['errors'])}"
+        )
+
+    dynamic_enrichment = summary.get("dynamic_enrichment")
+    if dynamic_enrichment is None:
+        print("dynamic enrichment: disabled")
+    elif dynamic_enrichment == {"status": "failed"}:
+        print("dynamic enrichment: failed")
+    else:
+        print(
+            "dynamic enrichment: "
+            f"eligible={dynamic_enrichment['jobs_eligible']} "
+            f"attempted={dynamic_enrichment['jobs_attempted']} "
+            f"enriched={dynamic_enrichment['jobs_enriched']} "
+            f"deferred={dynamic_enrichment['jobs_deferred']} "
+            f"unapproved={dynamic_enrichment['jobs_unapproved']} "
+            f"manual={dynamic_enrichment['jobs_manual_required']} "
+            f"failed={dynamic_enrichment['jobs_failed']}"
         )
 
     discord = summary.get("discord")

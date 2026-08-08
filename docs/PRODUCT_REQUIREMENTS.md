@@ -113,6 +113,20 @@ At minimum, the workflow must stop for:
 
 Approval for one gate must never be interpreted as approval for later gates.
 
+## Read-Only Posting Rendering
+
+Jobbot may use Playwright only as a bounded read-only fallback for an approved
+JavaScript-dependent job page. Provider destination resolution is limited to
+Adzuna, Remotive, and Himalayas. Official employer-page enrichment requires the
+destination domain in the local dynamic-render allowlist. LinkedIn and Indeed
+pages are never rendered.
+
+This stage may load same-host GET resources and read the resulting DOM. It must
+not click, type, authenticate, download, upload, solve access controls, modify a
+form, or submit anything. The application-assistance approval gates do not apply
+because this renderer cannot interact with an application; later Playwright form
+assistance remains a separate capability and decision boundary.
+
 ## Audit and Recovery
 
 For each application, store a timestamped event history containing progress,

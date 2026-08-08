@@ -32,6 +32,7 @@ def test_release_foundation_files_are_checked_in() -> None:
     required_paths = [
         Path(".github/workflows/ci.yml"),
         Path("config/candidate_profile.example.yaml"),
+        Path("config/dynamic_render_allowlist.json"),
         Path("docs/ARCHITECTURE.md"),
         Path("docs/V1_ROADMAP.md"),
     ]

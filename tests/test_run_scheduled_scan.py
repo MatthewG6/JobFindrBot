@@ -92,6 +92,88 @@ def enrichment_summary(errors: list | None = None) -> dict:
     }
 
 
+def dynamic_resolution_summary(errors: list | None = None) -> dict:
+    return {
+        "jobs_eligible": 2,
+        "jobs_attempted": 1,
+        "jobs_resolved": 1,
+        "jobs_deferred": 1,
+        "jobs_ambiguous": 0,
+        "jobs_manual_required": 0,
+        "jobs_failed": 0,
+        "errors": errors or [],
+    }
+
+
+def dynamic_enrichment_summary(errors: list | None = None) -> dict:
+    return {
+        "jobs_eligible": 2,
+        "jobs_attempted": 1,
+        "jobs_enriched": 1,
+        "jobs_deferred": 0,
+        "jobs_unapproved": 1,
+        "jobs_manual_required": 0,
+        "jobs_failed": 0,
+        "errors": errors or [],
+    }
+
+
+def test_dynamic_stages_run_in_resolution_and_enrichment_order(
+    tmp_path: Path,
+) -> None:
+    calls = []
+
+    summary = run_scheduled_scan(
+        storage=JobStorage(tmp_path / "jobs.json"),
+        state_path=tmp_path / "state.json",
+        now=NOW,
+        gmail_runner=lambda storage: gmail_summary(),
+        source_runners={},
+        resolver_runner=lambda storage: calls.append("resolver")
+        or resolver_summary(),
+        dynamic_resolution_runner=lambda storage: calls.append(
+            "dynamic_resolution"
+        )
+        or dynamic_resolution_summary(),
+        enrichment_runner=lambda storage: calls.append("enrichment")
+        or enrichment_summary(),
+        dynamic_enrichment_runner=lambda storage: calls.append(
+            "dynamic_enrichment"
+        )
+        or dynamic_enrichment_summary(),
+    )
+
+    assert calls == [
+        "resolver",
+        "dynamic_resolution",
+        "enrichment",
+        "dynamic_enrichment",
+    ]
+    assert summary["errors"] == []
+
+
+def test_unbalanced_dynamic_summary_is_rejected(tmp_path: Path) -> None:
+    invalid = dynamic_resolution_summary()
+    invalid["jobs_resolved"] = 9
+
+    summary = run_scheduled_scan(
+        storage=JobStorage(tmp_path / "jobs.json"),
+        state_path=tmp_path / "state.json",
+        now=NOW,
+        gmail_runner=lambda storage: gmail_summary(),
+        source_runners={},
+        resolver_runner=None,
+        dynamic_resolution_runner=lambda storage: invalid,
+        enrichment_runner=None,
+        dynamic_enrichment_runner=None,
+    )
+
+    assert summary["dynamic_resolution"] == {"status": "failed"}
+    assert summary["errors"] == [
+        {"source": "dynamic_resolution", "error_type": "ValueError"}
+    ]
+
+
 def test_first_scheduled_run_scans_all_configured_sources(
     tmp_path: Path,
 ) -> None:

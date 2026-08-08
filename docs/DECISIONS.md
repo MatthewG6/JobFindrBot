@@ -176,3 +176,34 @@ remains in this file and links to the decision that replaced it.
   do not make an otherwise healthy scheduler run fail.
 - Consequence: Schema v4 stores resolution attempt state and sanitized outcomes.
   Official links retain the original discovery URL and resolver provenance.
+
+## D017 - Read-only dynamic rendering
+
+- Status: accepted on 2026-08-08
+- Decision: Read-only Playwright rendering is a fallback after static resolution
+  or enrichment cannot read a JavaScript-dependent page. For destination
+  resolution, this is limited to Adzuna, Remotive, and Himalayas and is the only
+  exception to D004's official-destination-first boundary. Employer-page
+  enrichment requires an explicit domain in
+  `config/dynamic_render_allowlist.json`. LinkedIn and Indeed can never be
+  allowlisted or rendered.
+- Decision: Each page uses a fresh, non-persistent headless Chromium context.
+  DNS validation and the complete browser lifecycle run in a dedicated process
+  group with an eight-second wall-clock deadline; Jobbot terminates the group if
+  resolution, rendering, or cleanup stalls.
+  Rendering permits only GET requests for same-host documents, scripts, XHR, and
+  fetches. Public DNS is validated before launch and Chromium is pinned to one
+  validated address. Cross-host requests, downloads, service workers, workers,
+  websockets, beacons, media, images, fonts, stylesheets, popups, and non-GET
+  requests are blocked. Jobbot does not click, type, submit, authenticate, or
+  solve access challenges during this stage.
+- Decision: Dynamic provider resolution runs in a two-job batch with provider
+  rotation persisted across runs and accepts one exact external apply link.
+  Dynamic enrichment accepts one rendered
+  `JobPosting` payload whose title and company match the stored job. Ambiguous or
+  exhausted rendered pages require manual review. Transient browser failures use
+  a 24-hour cooldown; a missing Playwright or Chromium runtime is a scheduler
+  health failure rather than an item retry.
+- Consequence: Schema v5 stores separate dynamic-resolution attempts and
+  cooldowns. Structured metrics distinguish static resolution/enrichment from
+  dynamic attempts, outcomes, unapproved domains, and failures.
