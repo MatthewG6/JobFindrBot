@@ -443,10 +443,16 @@ def render_dynamic_page_worker(
             if remaining_seconds <= 0:
                 break
             if parent_connection.poll(min(remaining_seconds, 0.05)):
-                result = parent_connection.recv()
+                try:
+                    result = parent_connection.recv()
+                except EOFError:
+                    break
                 break
         if result is None and parent_connection.poll():
-            result = parent_connection.recv()
+            try:
+                result = parent_connection.recv()
+            except EOFError:
+                pass
     finally:
         if result is None or process.is_alive():
             stop_dynamic_render_worker(process)
@@ -457,7 +463,9 @@ def render_dynamic_page_worker(
             process.close()
 
     if result is None:
-        raise DynamicRenderRequestError("Dynamic render timed out")
+        if monotonic() >= deadline:
+            raise DynamicRenderRequestError("Dynamic render timed out")
+        raise DynamicRenderRequestError("Dynamic-render worker exited")
     status, *values = result
     if status == "ok":
         return RenderedPage(html=values[0], url=values[1])

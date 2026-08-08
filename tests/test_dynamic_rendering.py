@@ -344,6 +344,28 @@ def test_worker_process_is_killed_at_total_deadline(monkeypatch) -> None:
     assert time.monotonic() - started < 1
 
 
+def test_worker_eof_is_sanitized_as_a_request_error(monkeypatch) -> None:
+    def exit_without_result(connection, *args) -> None:
+        connection.close()
+
+    monkeypatch.setattr(
+        "app.dynamic_rendering.dynamic_render_worker_entry",
+        exit_without_result,
+    )
+
+    with pytest.raises(
+        DynamicRenderRequestError,
+        match="worker exited",
+    ):
+        render_dynamic_page_worker(
+            "https://jobs.example.com/posting/1",
+            initial_hostname="jobs.example.com",
+            addresses=("93.184.216.34",),
+            timeout_ms=1_000,
+            settle_ms=0,
+        )
+
+
 def test_worker_fails_closed_when_process_isolation_is_unavailable(
     monkeypatch,
 ) -> None:
