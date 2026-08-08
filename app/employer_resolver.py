@@ -29,6 +29,7 @@ PROVIDER_DESTINATION_DOMAINS = {
     "remotive": ("remotive.com",),
 }
 PROVIDER_APPLY_LABELS = {
+    "adzuna": frozenset({"apply", "apply for this job", "apply now"}),
     "himalayas": frozenset({"apply", "apply for this job", "apply now"}),
     "remotive": frozenset({"apply for this position"}),
 }

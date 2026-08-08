@@ -41,7 +41,9 @@ def scheduler_metric(
     gmail = summary.get("gmail")
     discord = summary.get("discord")
     resolver = summary.get("resolver")
+    dynamic_resolution = summary.get("dynamic_resolution")
     enrichment = summary.get("enrichment")
+    dynamic_enrichment = summary.get("dynamic_enrichment")
     sources = {}
     for name, result in summary.get("sources", {}).items():
         source_summary = result.get("summary") or {}
@@ -115,6 +117,24 @@ def scheduler_metric(
                 "error_count": len(resolver.get("errors", [])),
             }
         ),
+        "dynamic_resolution": (
+            None
+            if dynamic_resolution is None
+            or dynamic_resolution.get("status") == "failed"
+            else {
+                "jobs_eligible": dynamic_resolution.get("jobs_eligible", 0),
+                "jobs_attempted": dynamic_resolution.get("jobs_attempted", 0),
+                "jobs_resolved": dynamic_resolution.get("jobs_resolved", 0),
+                "jobs_deferred": dynamic_resolution.get("jobs_deferred", 0),
+                "jobs_ambiguous": dynamic_resolution.get("jobs_ambiguous", 0),
+                "jobs_manual_required": dynamic_resolution.get(
+                    "jobs_manual_required",
+                    0,
+                ),
+                "jobs_failed": dynamic_resolution.get("jobs_failed", 0),
+                "error_count": len(dynamic_resolution.get("errors", [])),
+            }
+        ),
         "enrichment": (
             None
             if enrichment is None or enrichment.get("status") == "failed"
@@ -145,6 +165,24 @@ def scheduler_metric(
                 ),
                 "jobs_failed": enrichment.get("jobs_failed", 0),
                 "error_count": len(enrichment.get("errors", [])),
+            }
+        ),
+        "dynamic_enrichment": (
+            None
+            if dynamic_enrichment is None
+            or dynamic_enrichment.get("status") == "failed"
+            else {
+                "jobs_eligible": dynamic_enrichment.get("jobs_eligible", 0),
+                "jobs_attempted": dynamic_enrichment.get("jobs_attempted", 0),
+                "jobs_enriched": dynamic_enrichment.get("jobs_enriched", 0),
+                "jobs_deferred": dynamic_enrichment.get("jobs_deferred", 0),
+                "jobs_unapproved": dynamic_enrichment.get("jobs_unapproved", 0),
+                "jobs_manual_required": dynamic_enrichment.get(
+                    "jobs_manual_required",
+                    0,
+                ),
+                "jobs_failed": dynamic_enrichment.get("jobs_failed", 0),
+                "error_count": len(dynamic_enrichment.get("errors", [])),
             }
         ),
         "discord": (

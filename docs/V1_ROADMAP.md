@@ -24,7 +24,7 @@ submitting anything without explicit approval.
 - [x] Resolve official employer or ATS postings without automating LinkedIn or Indeed
 - [x] Validate redirects, public destinations, provenance, and confidence
 - [x] Enrich jobs through ATS APIs or static employer pages
-- [ ] Add read-only Playwright rendering for approved dynamic employer pages
+- [x] Add read-only Playwright rendering for approved dynamic employer pages
 - [x] Provide a manual URL handoff when automatic resolution is not possible
 
 ### Scoring quality
@@ -68,17 +68,16 @@ submitting anything without explicit approval.
 
 ## Ordered Backlog
 
-1. Add read-only dynamic employer-page rendering
-2. Build Scoring V2 dimensions, confidence, evidence, and version migration
-3. Build the labeling workflow and held-out scoring benchmark
-4. Add the focused local review and labeling dashboard
-5. Implement D015, including key recovery, backup purge, and its sensitive-data
+1. Build Scoring V2 dimensions, confidence, evidence, and version migration
+2. Build the labeling workflow and held-out scoring benchmark
+3. Add the focused local review and labeling dashboard
+4. Implement D015, including key recovery, backup purge, and its sensitive-data
    restore drill
-6. Add the private application profile and approved document catalog
-7. Add structured answer memory, Discord non-sensitive question approvals, and
+5. Add the private application profile and approved document catalog
+6. Add structured answer memory, Discord non-sensitive question approvals, and
    owner-only local sensitive input
-8. Add approved ATS form-assistance adapters and final review package
-9. Rehearse restore, complete release QA, and publish V1 documentation
+7. Add approved ATS form-assistance adapters and final review package
+8. Rehearse restore, complete release QA, and publish V1 documentation
 
 ## Later Versions
 

@@ -13,3 +13,4 @@ google-auth-oauthlib
 pytest
 httpx2
 discord.py>=2.7,<3
+playwright==1.62.0

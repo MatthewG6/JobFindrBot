@@ -8,7 +8,11 @@ flowchart LR
     APIs["Public APIs and employer boards"] --> Ingest
     Ingest --> InitialScore["Initial scoring"]
     InitialScore --> Resolve["Employer-site resolver"]
+    Resolve --> ProviderDynamic["Read-only provider rendering"]
+    ProviderDynamic --> Enrich
     Resolve --> Enrich["Official posting enrichment"]
+    Enrich --> EmployerDynamic["Allowlisted dynamic enrichment"]
+    EmployerDynamic --> Rescore
     Enrich --> Rescore["Enriched rescoring"]
     InitialScore --> Discord["Discord review inbox"]
     Rescore --> Discord
@@ -25,12 +29,10 @@ flowchart LR
 
 The resolver is operational for captured official links, exact employer-board
 matches, bounded Adzuna/Remotive/Himalayas destination extraction, and manual
-handoff. Static enrichment is operational for captured official payloads,
-Greenhouse and Lever APIs, and matching employer-page `JobPosting` JSON-LD.
-Read-only rendering of JavaScript-only pages, Scoring V2, the dashboard, and ATS
-assistance remain V1 work in progress. Discovery, ingestion, current scoring,
-Discord, persistence, scheduling, and application approval records are
-operational.
+handoff. Enrichment is operational for captured official payloads, Greenhouse
+and Lever APIs, and matching employer-page `JobPosting` JSON-LD. Approved
+JavaScript-dependent fallbacks use bounded read-only Playwright rendering.
+Scoring V2, the dashboard, and ATS assistance remain V1 work in progress.
 
 The resolver retains every incoming URL as provenance. LinkedIn, Indeed, and
 aggregator URLs remain discovery links; only validated public HTTPS employer/ATS
@@ -46,7 +48,14 @@ redirect, and parsed posting identity must match the stored job. Successful
 enrichment preserves the method and source URL, updates posting details, and
 reruns deterministic scoring. Transient requests are deferred for retry;
 terminal payload errors require manual review, and pages without unique static
-posting data are routed to the future dynamic-page stage.
+posting data are routed to the approved dynamic-page stage.
+
+Dynamic rendering uses a fresh non-persistent Chromium context and never clicks,
+types, authenticates, or submits. Only same-host GET document/script/XHR/fetch
+requests are allowed; the validated hostname is pinned to a public address and
+all other resource classes and browser communication APIs are blocked. Provider
+resolution is limited to the D016 sources. Employer enrichment requires an
+explicit domain allowlist entry and a rendered posting identity match.
 
 ## Application Memory
 
@@ -64,8 +73,8 @@ an approved answer source.
 - LinkedIn and Indeed are discovery and email-notification providers only.
 - Jobbot does not automate or scrape LinkedIn or Indeed pages.
 - Official APIs and employer ATS endpoints are preferred over browser rendering.
-- Read-only Playwright is permitted only after an official employer destination
-  is known and allowed by that site's rules.
+- Read-only Playwright is permitted only for D016 provider resolution or after an
+  official employer destination is known and explicitly allowlisted.
 - Application automation remains behind start and submit approvals.
 - Credentials, job history, labels, backups, and metrics remain local and private.
 
@@ -83,6 +92,7 @@ Schema v3 retains each source's posting snapshot alongside canonical jobs and UR
 provenance. This allows richer official-board data to update a job first found in
 an email without losing where either record came from. Schema v4 adds provider
 resolution attempt counts, timestamps, cooldowns, and sanitized outcome types.
+Schema v5 adds separate dynamic-resolution attempts and cooldowns.
 
 Backup SHA-256 sidecars detect accidental corruption. They are not authenticated
 and do not defend against a malicious local user who can rewrite both files; V1's

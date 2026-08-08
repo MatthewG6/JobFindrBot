@@ -43,6 +43,16 @@ def test_scheduler_metric_is_structured_and_sanitized() -> None:
             "provider_jobs_failed": 0,
             "errors": [],
         },
+        "dynamic_resolution": {
+            "jobs_eligible": 4,
+            "jobs_attempted": 2,
+            "jobs_resolved": 1,
+            "jobs_deferred": 2,
+            "jobs_ambiguous": 0,
+            "jobs_manual_required": 0,
+            "jobs_failed": 1,
+            "errors": [],
+        },
         "enrichment": {
             "jobs_eligible": 4,
             "jobs_attempted": 2,
@@ -53,6 +63,16 @@ def test_scheduler_metric_is_structured_and_sanitized() -> None:
             "jobs_already_dynamic_required": 2,
             "jobs_manual_required": 0,
             "jobs_already_manual_required": 1,
+            "jobs_failed": 0,
+            "errors": [],
+        },
+        "dynamic_enrichment": {
+            "jobs_eligible": 3,
+            "jobs_attempted": 1,
+            "jobs_enriched": 1,
+            "jobs_deferred": 1,
+            "jobs_unapproved": 1,
+            "jobs_manual_required": 0,
             "jobs_failed": 0,
             "errors": [],
         },
@@ -74,8 +94,11 @@ def test_scheduler_metric_is_structured_and_sanitized() -> None:
     assert metric["resolver"]["jobs_resolved"] == 1
     assert metric["resolver"]["provider_jobs_attempted"] == 2
     assert metric["resolver"]["provider_jobs_dynamic_required"] == 1
+    assert metric["dynamic_resolution"]["jobs_attempted"] == 2
+    assert metric["dynamic_resolution"]["jobs_failed"] == 1
     assert metric["enrichment"]["jobs_enriched"] == 1
     assert metric["enrichment"]["jobs_already_enriched"] == 5
+    assert metric["dynamic_enrichment"]["jobs_unapproved"] == 1
     assert "summary" not in metric["sources"]["remotive"]
 
 
