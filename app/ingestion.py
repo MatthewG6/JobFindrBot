@@ -1,6 +1,6 @@
 from app.dedupe import job_content_hash
 from app.models import JobPosting
-from app.scoring import score_job
+from app.scoring import score_job, scoring_fields
 from app.storage import JobStorage
 
 
@@ -13,9 +13,7 @@ def ingest_job(job: JobPosting, storage: JobStorage) -> dict:
     scored_job = score_job(job)
     job_data = job.model_dump(mode="json")
     job_data["content_hash"] = job_content_hash(job)
-    job_data["fit_score"] = scored_job.score
-    job_data["score_reasons"] = scored_job.reasons
-    job_data["red_flags"] = scored_job.red_flags
+    job_data.update(scoring_fields(scored_job))
 
     saved_job, created = storage.save_job_with_status(job_data)
     if not created:
@@ -25,6 +23,10 @@ def ingest_job(job: JobPosting, storage: JobStorage) -> dict:
             "score": saved_job.get("fit_score", scored_job.score),
             "reasons": saved_job.get("score_reasons", scored_job.reasons),
             "red_flags": saved_job.get("red_flags", scored_job.red_flags),
+            "confidence": saved_job.get(
+                "score_confidence",
+                scored_job.confidence,
+            ),
         }
 
     return {
@@ -33,4 +35,5 @@ def ingest_job(job: JobPosting, storage: JobStorage) -> dict:
         "score": scored_job.score,
         "reasons": scored_job.reasons,
         "red_flags": scored_job.red_flags,
+        "confidence": scored_job.confidence,
     }

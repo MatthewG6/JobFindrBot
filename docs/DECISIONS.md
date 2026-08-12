@@ -207,3 +207,29 @@ remains in this file and links to the decision that replaced it.
 - Consequence: Schema v5 stores separate dynamic-resolution attempts and
   cooldowns. Structured metrics distinguish static resolution/enrichment from
   dynamic attempts, outcomes, unapproved domains, and failures.
+
+## D018 - Deterministic Scoring V2
+
+- Status: accepted on 2026-08-08
+- Decision: Fit is a deterministic 0-to-100 weighted result across role,
+  seniority, skills, location, and risk. Weights total 100. Phrase-boundary
+  evidence is deduplicated by canonical signal, while title-level seniority
+  exclusions are limited to the title. Missing role evidence, excluded
+  seniority or experience, or explicit risk caps a job below review.
+- Decision: Confidence is independent of fit and measures posting completeness
+  and evidence coverage. Every score stores normalized dimensions, structured
+  evidence, confidence, confidence band, scoring version, and the review
+  threshold used for hard caps. The storage boundary validates the exact result.
+  Initial ingestion, enrichment, and stale-job migration use the same scorer.
+- Decision: Candidate profile schema v2 separates role, seniority, risk, and
+  dimension weights. Existing private schema v1 profiles migrate in memory and
+  are not rewritten when they contain at least one non-seniority target role.
+  An alias-only legacy profile must be corrected explicitly rather than having
+  Jobbot invent a target occupation. Database schema v6 structurally marks legacy scores; the
+  bounded scheduler scoring stage upgrades them before Discord notifications.
+- Decision: A stale historical job made reviewable during a scoring-version
+  upgrade is atomically baselined for Discord. New jobs scored by the current
+  version remain notification-eligible.
+- Consequence: Scoring output is explainable and migration-safe, but accuracy is
+  unproven until D011's real labels and held-out validation gate pass. The next
+  milestone is labeling and benchmark evidence, not threshold tuning by anecdote.

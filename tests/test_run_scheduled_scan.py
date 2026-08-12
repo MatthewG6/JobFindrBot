@@ -118,7 +118,20 @@ def dynamic_enrichment_summary(errors: list | None = None) -> dict:
     }
 
 
-def test_dynamic_stages_run_in_resolution_and_enrichment_order(
+def scoring_summary(errors: list | None = None) -> dict:
+    return {
+        "jobs_considered": 3,
+        "jobs_eligible": 2,
+        "jobs_attempted": 2,
+        "jobs_rescored": 2 if not errors else 1,
+        "jobs_notification_baselined": 1,
+        "jobs_deferred": 0,
+        "jobs_failed": 0 if not errors else 1,
+        "errors": errors or [],
+    }
+
+
+def test_dynamic_and_scoring_stages_run_before_notifications(
     tmp_path: Path,
 ) -> None:
     calls = []
@@ -141,6 +154,10 @@ def test_dynamic_stages_run_in_resolution_and_enrichment_order(
             "dynamic_enrichment"
         )
         or dynamic_enrichment_summary(),
+        scoring_runner=lambda storage: calls.append("scoring")
+        or scoring_summary(),
+        notification_runner=lambda storage: calls.append("discord")
+        or notification_summary(),
     )
 
     assert calls == [
@@ -148,6 +165,8 @@ def test_dynamic_stages_run_in_resolution_and_enrichment_order(
         "dynamic_resolution",
         "enrichment",
         "dynamic_enrichment",
+        "scoring",
+        "discord",
     ]
     assert summary["errors"] == []
 
@@ -171,6 +190,76 @@ def test_unbalanced_dynamic_summary_is_rejected(tmp_path: Path) -> None:
     assert summary["dynamic_resolution"] == {"status": "failed"}
     assert summary["errors"] == [
         {"source": "dynamic_resolution", "error_type": "ValueError"}
+    ]
+
+
+def test_unbalanced_scoring_summary_is_rejected(tmp_path: Path) -> None:
+    invalid = scoring_summary()
+    invalid["jobs_rescored"] = 9
+
+    summary = run_scheduled_scan(
+        storage=JobStorage(tmp_path / "jobs.json"),
+        state_path=tmp_path / "state.json",
+        now=NOW,
+        gmail_runner=lambda storage: gmail_summary(),
+        source_runners={},
+        resolver_runner=None,
+        dynamic_resolution_runner=None,
+        enrichment_runner=None,
+        dynamic_enrichment_runner=None,
+        scoring_runner=lambda storage: invalid,
+    )
+
+    assert summary["scoring"] == {"status": "failed"}
+    assert summary["errors"] == [
+        {"source": "scoring", "error_type": "ValueError"}
+    ]
+
+
+def test_scoring_summary_cannot_exceed_considered_jobs(tmp_path: Path) -> None:
+    invalid = scoring_summary()
+    invalid["jobs_considered"] = 1
+
+    summary = run_scheduled_scan(
+        storage=JobStorage(tmp_path / "jobs.json"),
+        state_path=tmp_path / "state.json",
+        now=NOW,
+        gmail_runner=lambda storage: gmail_summary(),
+        source_runners={},
+        resolver_runner=None,
+        dynamic_resolution_runner=None,
+        enrichment_runner=None,
+        dynamic_enrichment_runner=None,
+        scoring_runner=lambda storage: invalid,
+    )
+
+    assert summary["scoring"] == {"status": "failed"}
+    assert summary["errors"] == [
+        {"source": "scoring", "error_type": "ValueError"}
+    ]
+
+
+def test_scoring_item_errors_fail_health_without_private_details(
+    tmp_path: Path,
+) -> None:
+    summary = run_scheduled_scan(
+        storage=JobStorage(tmp_path / "jobs.json"),
+        state_path=tmp_path / "state.json",
+        now=NOW,
+        gmail_runner=lambda storage: gmail_summary(),
+        source_runners={},
+        resolver_runner=None,
+        dynamic_resolution_runner=None,
+        enrichment_runner=None,
+        dynamic_enrichment_runner=None,
+        scoring_runner=lambda storage: scoring_summary(
+            [{"job_id": 99, "error_type": "PrivateFailure"}]
+        ),
+    )
+
+    assert summary["scoring"]["jobs_failed"] == 1
+    assert summary["errors"] == [
+        {"source": "scoring", "error_type": "ScoringItemErrors"}
     ]
 
 
@@ -279,6 +368,8 @@ def test_discord_runs_after_job_sources(tmp_path: Path) -> None:
         or resolver_summary(),
         enrichment_runner=lambda storage: calls.append("enrichment")
         or enrichment_summary(),
+        scoring_runner=lambda storage: calls.append("scoring")
+        or scoring_summary(),
         notification_runner=lambda storage: calls.append("discord")
         or notification_summary(),
     )
@@ -288,6 +379,7 @@ def test_discord_runs_after_job_sources(tmp_path: Path) -> None:
         "remotive",
         "resolver",
         "enrichment",
+        "scoring",
         "discord",
     ]
     assert summary["discord"]["status"] == "ok"

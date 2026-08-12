@@ -8,6 +8,7 @@ def save_scored_job(
     storage: JobStorage,
     title: str,
     fit_score: object,
+    scoring_version: int = 2,
 ) -> dict:
     slug = title.lower().replace(" ", "-")
     return storage.save_job(
@@ -18,6 +19,7 @@ def save_scored_job(
             "url": f"https://example.com/jobs/{slug}",
             "source": "test",
             "fit_score": fit_score,
+            "scoring_version": scoring_version,
             "content_hash": slug,
         }
     )
@@ -41,6 +43,21 @@ def test_high_scoring_job_creates_application_candidate(tmp_path: Path) -> None:
 def test_low_scoring_job_does_not_create_candidate(tmp_path: Path) -> None:
     storage = JobStorage(tmp_path / "jobs.json")
     save_scored_job(storage, "Low Score Job", 74)
+
+    created = create_application_candidates(storage)
+
+    assert created == []
+    assert storage.list_applications() == []
+
+
+def test_stale_high_score_does_not_create_candidate(tmp_path: Path) -> None:
+    storage = JobStorage(tmp_path / "jobs.json")
+    save_scored_job(
+        storage,
+        "Legacy Strong Match",
+        90,
+        scoring_version=1,
+    )
 
     created = create_application_candidates(storage)
 

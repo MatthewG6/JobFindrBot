@@ -131,6 +131,9 @@ def test_duplicate_official_payload_enriches_without_network(
     assert enriched["enrichment_method"] == "captured_official_payload"
     assert "React and TypeScript" in enriched["description"]
     assert enriched["fit_score"] > provider["fit_score"]
+    assert enriched["scoring_version"] == 2
+    assert len(enriched["score_dimensions"]) == 5
+    assert isinstance(enriched["score_evidence"], list)
     assert len(storage.list_job_source_records(provider["id"])) == 2
 
 
@@ -757,7 +760,7 @@ def test_schema_three_backfills_source_records(tmp_path: Path) -> None:
     storage = JobStorage(database_path)
     saved = storage.list_jobs()[0]
 
-    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 5
+    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 6
     assert saved["enrichment_status"] == "enriched"
     assert len(storage.list_job_source_records(saved["id"])) == 1
 

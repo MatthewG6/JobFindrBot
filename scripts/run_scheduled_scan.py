@@ -22,6 +22,7 @@ from app.dynamic_rendering import (
 )
 from app.job_enrichment import enrich_resolved_jobs
 from app.operational_metrics import append_scheduler_metric, scheduler_metric
+from app.scoring import rescore_stale_jobs
 from app.discord_notifications import (
     DiscordNotConfigured,
     run_discord_notifications,
@@ -52,6 +53,7 @@ NotificationRunner = Callable[[JobStorage], dict]
 ResolverRunner = Callable[[JobStorage], dict]
 EnrichmentRunner = Callable[[JobStorage], dict]
 DynamicRunner = Callable[[JobStorage], dict]
+ScoringRunner = Callable[[JobStorage], dict]
 
 
 def default_source_runners() -> dict[str, SourceRunner]:
@@ -347,6 +349,36 @@ def validate_dynamic_enrichment_summary(summary: object) -> dict:
     return summary
 
 
+def validate_scoring_summary(summary: object) -> dict:
+    if not isinstance(summary, dict) or not isinstance(summary.get("errors"), list):
+        raise ValueError("Scoring runner returned an invalid summary")
+    for key in (
+        "jobs_considered",
+        "jobs_eligible",
+        "jobs_attempted",
+        "jobs_rescored",
+        "jobs_notification_baselined",
+        "jobs_deferred",
+        "jobs_failed",
+    ):
+        required_nonnegative_int(summary, key)
+    if summary["jobs_attempted"] + summary["jobs_deferred"] != summary[
+        "jobs_eligible"
+    ]:
+        raise ValueError("Scoring eligibility counts do not balance")
+    if summary["jobs_eligible"] > summary["jobs_considered"]:
+        raise ValueError("Scoring considered counts do not balance")
+    if summary["jobs_rescored"] + summary["jobs_failed"] != summary[
+        "jobs_attempted"
+    ]:
+        raise ValueError("Scoring attempt counts do not balance")
+    if len(summary["errors"]) != summary["jobs_failed"]:
+        raise ValueError("Scoring error counts do not balance")
+    if summary["jobs_notification_baselined"] > summary["jobs_rescored"]:
+        raise ValueError("Scoring notification counts do not balance")
+    return summary
+
+
 def default_gmail_runner(storage: JobStorage) -> dict:
     client = GmailJobAlertClient.from_local_oauth(allow_interactive=False)
     return run_gmail_scan(storage=storage, client=client)
@@ -372,6 +404,13 @@ def default_dynamic_enrichment_runner(storage: JobStorage) -> dict:
     return enrich_dynamic_jobs(storage)
 
 
+def default_scoring_runner(storage: JobStorage) -> dict:
+    return rescore_stale_jobs(
+        storage,
+        baseline_notification_channel="discord",
+    )
+
+
 def run_scheduled_scan(
     *,
     storage: JobStorage | None = None,
@@ -388,6 +427,7 @@ def run_scheduled_scan(
     dynamic_enrichment_runner: DynamicRunner | None = (
         default_dynamic_enrichment_runner
     ),
+    scoring_runner: ScoringRunner | None = default_scoring_runner,
     notification_runner: NotificationRunner | None = None,
 ) -> dict:
     storage = storage or JobStorage(DEFAULT_GMAIL_DB_PATH)
@@ -422,6 +462,7 @@ def run_scheduled_scan(
         "dynamic_resolution": None,
         "enrichment": None,
         "dynamic_enrichment": None,
+        "scoring": None,
         "discord": None,
         "errors": errors,
     }
@@ -582,6 +623,20 @@ def run_scheduled_scan(
                 }
             )
 
+    if scoring_runner is not None:
+        try:
+            scoring_summary = validate_scoring_summary(scoring_runner(storage))
+            summary["scoring"] = scoring_summary
+            if scoring_summary["errors"]:
+                errors.append(
+                    {"source": "scoring", "error_type": "ScoringItemErrors"}
+                )
+        except Exception as error:
+            summary["scoring"] = {"status": "failed"}
+            errors.append(
+                {"source": "scoring", "error_type": type(error).__name__}
+            )
+
     if notification_runner is not None:
         try:
             discord_summary = validate_notification_summary(
@@ -701,6 +756,22 @@ def print_summary(summary: dict) -> None:
             f"unapproved={dynamic_enrichment['jobs_unapproved']} "
             f"manual={dynamic_enrichment['jobs_manual_required']} "
             f"failed={dynamic_enrichment['jobs_failed']}"
+        )
+
+    scoring = summary.get("scoring")
+    if scoring is None:
+        print("scoring: disabled")
+    elif scoring == {"status": "failed"}:
+        print("scoring: failed")
+    else:
+        print(
+            "scoring: "
+            f"considered={scoring['jobs_considered']} "
+            f"eligible={scoring['jobs_eligible']} "
+            f"rescored={scoring['jobs_rescored']} "
+            f"baselined={scoring['jobs_notification_baselined']} "
+            f"deferred={scoring['jobs_deferred']} "
+            f"failed={scoring['jobs_failed']}"
         )
 
     discord = summary.get("discord")

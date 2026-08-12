@@ -186,7 +186,12 @@ def job_embed(job: dict) -> dict:
             },
             {
                 "name": "Fit score",
-                "value": discord_text(job.get("fit_score"), 32),
+                "value": discord_text(
+                    f"{job.get('fit_score')}/100"
+                    if job.get("scoring_version") == 2
+                    else job.get("fit_score"),
+                    32,
+                ),
                 "inline": True,
             },
             {
@@ -214,6 +219,35 @@ def job_embed(job: dict) -> dict:
         embed["fields"].append(
             {"name": "Salary", "value": salary, "inline": True}
         )
+    confidence = job.get("score_confidence")
+    confidence_band = job.get("score_confidence_band")
+    if (
+        isinstance(confidence, int)
+        and not isinstance(confidence, bool)
+        and confidence_band in {"low", "medium", "high"}
+    ):
+        embed["fields"].append(
+            {
+                "name": "Score confidence",
+                "value": f"{confidence}/100 ({confidence_band})",
+                "inline": True,
+            }
+        )
+    dimensions = job.get("score_dimensions")
+    if isinstance(dimensions, list):
+        dimension_parts = []
+        for item in dimensions:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            score = item.get("score")
+            if isinstance(name, str) and isinstance(score, int):
+                dimension_parts.append(f"{name.title()} {score}")
+        breakdown = discord_text(" | ".join(dimension_parts), 500)
+        if breakdown:
+            embed["fields"].append(
+                {"name": "Fit breakdown", "value": breakdown}
+            )
     reasons = job.get("score_reasons") or []
     if isinstance(reasons, list):
         reason_text = discord_text("\n".join(map(str, reasons[:4])), 800)
@@ -355,7 +389,8 @@ def run_discord_notifications(
     eligible_jobs = [
         job
         for job in storage.list_jobs()
-        if qualifies_for_application(job.get("fit_score"), threshold)
+        if job.get("scoring_version") == 2
+        and qualifies_for_application(job.get("fit_score"), threshold)
     ]
     eligible_jobs.sort(
         key=lambda job: (job.get("fit_score", 0), job.get("id", 0)),

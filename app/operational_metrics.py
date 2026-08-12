@@ -44,6 +44,7 @@ def scheduler_metric(
     dynamic_resolution = summary.get("dynamic_resolution")
     enrichment = summary.get("enrichment")
     dynamic_enrichment = summary.get("dynamic_enrichment")
+    scoring = summary.get("scoring")
     sources = {}
     for name, result in summary.get("sources", {}).items():
         source_summary = result.get("summary") or {}
@@ -183,6 +184,23 @@ def scheduler_metric(
                 ),
                 "jobs_failed": dynamic_enrichment.get("jobs_failed", 0),
                 "error_count": len(dynamic_enrichment.get("errors", [])),
+            }
+        ),
+        "scoring": (
+            None
+            if scoring is None or scoring.get("status") == "failed"
+            else {
+                "jobs_considered": scoring.get("jobs_considered", 0),
+                "jobs_eligible": scoring.get("jobs_eligible", 0),
+                "jobs_attempted": scoring.get("jobs_attempted", 0),
+                "jobs_rescored": scoring.get("jobs_rescored", 0),
+                "jobs_notification_baselined": scoring.get(
+                    "jobs_notification_baselined",
+                    0,
+                ),
+                "jobs_deferred": scoring.get("jobs_deferred", 0),
+                "jobs_failed": scoring.get("jobs_failed", 0),
+                "error_count": len(scoring.get("errors", [])),
             }
         ),
         "discord": (
