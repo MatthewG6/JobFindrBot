@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jobbot Scoring Review</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: light-dark(#f4f5f2, #171918);
+      --surface: light-dark(#ffffff, #222523);
+      --surface-muted: light-dark(#eef0ec, #2b2f2c);
+      --text: light-dark(#1b211d, #f1f4f1);
+      --muted: light-dark(#5f6962, #aeb7b0);
+      --border: light-dark(#d5dad5, #444a45);
+      --accent: light-dark(#176b45, #72d2a3);
+      --reject: light-dark(#a83232, #ff8e8e);
+      --review: light-dark(#8a5a00, #f1bd55);
+      --strong: light-dark(#176b45, #72d2a3);
+      --focus: light-dark(#1259a5, #7bb8ff);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--page);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button, a { font: inherit; }
+    button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+    .shell {
+      width: min(1080px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 24px 0 48px;
+    }
+
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand { font-size: 13px; font-weight: 750; color: var(--accent); text-transform: uppercase; }
+    h1 { margin: 5px 0 0; font-size: 26px; line-height: 1.15; }
+    .phase { color: var(--muted); font-size: 14px; text-align: right; }
+    .phase strong { display: block; color: var(--text); font-size: 18px; }
+
+    .progress-track {
+      height: 5px;
+      margin: 14px 0 24px;
+      overflow: hidden;
+      background: var(--surface-muted);
+    }
+
+    .progress-bar { width: 0; height: 100%; background: var(--accent); transition: width 180ms ease; }
+
+    .empty {
+      min-height: 420px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+    }
+
+    .empty h2 { margin: 0 0 8px; font-size: 22px; }
+    .empty p { margin: 0 0 20px; color: var(--muted); }
+
+    .primary, .continue {
+      border: 0;
+      border-radius: 6px;
+      padding: 11px 17px;
+      background: var(--accent);
+      color: light-dark(#ffffff, #102117);
+      cursor: pointer;
+      font-weight: 750;
+    }
+
+    .review-layout { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 24px; align-items: start; }
+    .posting { min-width: 0; }
+    .eyebrow { color: var(--muted); font-size: 13px; font-weight: 700; text-transform: uppercase; }
+    .posting h2 { margin: 7px 0 4px; font-size: 24px; line-height: 1.25; overflow-wrap: anywhere; }
+    .company { margin: 0; font-size: 16px; font-weight: 650; }
+    .metadata { display: flex; flex-wrap: wrap; gap: 7px 18px; margin: 14px 0 20px; color: var(--muted); font-size: 14px; }
+    .posting-link { color: var(--accent); font-weight: 700; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    .description { border-top: 1px solid var(--border); padding-top: 20px; white-space: pre-wrap; line-height: 1.62; overflow-wrap: anywhere; }
+
+    .decision-panel {
+      position: sticky;
+      top: 20px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 16px;
+    }
+
+    .decision-panel h3 { margin: 0 0 13px; font-size: 15px; }
+    .decision-buttons { display: grid; gap: 9px; }
+    .decision {
+      min-height: 44px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+      font-weight: 750;
+      padding: 10px 12px;
+    }
+
+    .decision[data-label="reject"]:hover { border-color: var(--reject); color: var(--reject); }
+    .decision[data-label="review"]:hover { border-color: var(--review); color: var(--review); }
+    .decision[data-label="strong"]:hover { border-color: var(--strong); color: var(--strong); }
+    .decision:disabled { cursor: wait; opacity: .45; }
+    .error { margin-top: 13px; color: var(--reject); font-size: 13px; }
+
+    .result { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 16px; }
+    .result-line { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 7px; font-size: 14px; }
+    .result-line span { color: var(--muted); }
+    .dimension-list { display: grid; gap: 6px; margin: 14px 0; }
+    .dimension { display: grid; grid-template-columns: 1fr auto; gap: 10px; font-size: 13px; }
+    .continue { width: 100%; margin-top: 5px; }
+
+    .summary { max-width: 760px; margin: 48px auto 0; }
+    .summary h2 { margin-bottom: 6px; }
+    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-top: 22px; }
+    .metric { padding: 18px 12px; }
+    .metric + .metric { border-left: 1px solid var(--border); }
+    .metric span { display: block; color: var(--muted); font-size: 12px; }
+    .metric strong { display: block; margin-top: 5px; font-size: 24px; }
+
+    [hidden] { display: none !important; }
+
+    @media (max-width: 720px) {
+      .shell { width: min(100% - 24px, 1080px); padding-top: 16px; }
+      header { align-items: flex-start; }
+      h1 { font-size: 22px; }
+      .review-layout { grid-template-columns: 1fr; }
+      .decision-panel { position: static; order: -1; }
+      .decision-buttons { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .decision { text-align: center; padding: 8px 4px; }
+      .posting h2 { font-size: 21px; }
+      .metrics { grid-template-columns: 1fr; }
+      .metric + .metric { border-left: 0; border-top: 1px solid var(--border); }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="brand">Jobbot</div>
+        <h1>Scoring Review</h1>
+      </div>
+      <div class="phase" id="phase"><strong>Not started</strong><span>0 of 75</span></div>
+    </header>
+    <div class="progress-track" aria-hidden="true"><div class="progress-bar" id="progress-bar"></div></div>
+
+    <section class="empty" id="start-state">
+      <div>
+        <h2>Real-job review set</h2>
+        <p>25 calibration posts, then 50 held-out posts.</p>
+        <button class="primary" id="start-button" type="button">Build review set</button>
+        <div class="error" id="start-error" role="alert"></div>
+      </div>
+    </section>
+
+    <section class="review-layout" id="review-state" hidden>
+      <article class="posting">
+        <div class="eyebrow" id="queue-position"></div>
+        <h2 id="job-title"></h2>
+        <p class="company" id="job-company"></p>
+        <div class="metadata">
+          <span id="job-location"></span>
+          <span id="job-salary"></span>
+          <span id="job-source"></span>
+          <span id="job-posted"></span>
+        </div>
+        <a class="posting-link" id="job-link" target="_blank" rel="noopener noreferrer">Open job posting</a>
+        <div class="description" id="job-description"></div>
+      </article>
+
+      <aside class="decision-panel">
+        <h3>Your judgment</h3>
+        <div class="decision-buttons" id="decision-buttons">
+          <button class="decision" data-label="reject" type="button">Reject</button>
+          <button class="decision" data-label="review" type="button">Review</button>
+          <button class="decision" data-label="strong" type="button">Strong</button>
+        </div>
+        <div class="error" id="label-error" role="alert"></div>
+        <div class="result" id="result" hidden>
+          <div class="result-line"><span>Your label</span><strong id="actual-label"></strong></div>
+          <div class="result-line"><span>Jobbot</span><strong id="predicted-label"></strong></div>
+          <div class="result-line"><span>Fit / confidence</span><strong id="score-line"></strong></div>
+          <div class="dimension-list" id="dimensions"></div>
+          <button class="continue" id="continue-button" type="button">Next posting</button>
+        </div>
+      </aside>
+    </section>
+
+    <section class="summary" id="summary-state" hidden>
+      <div class="eyebrow">Review complete</div>
+      <h2>Held-out benchmark</h2>
+      <div class="metrics">
+        <div class="metric"><span>Accuracy</span><strong id="accuracy"></strong></div>
+        <div class="metric"><span>Balanced accuracy</span><strong id="balanced-accuracy"></strong></div>
+        <div class="metric"><span>Review-inbox precision</span><strong id="reviewable-precision"></strong></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const startState = document.getElementById("start-state");
+    const reviewState = document.getElementById("review-state");
+    const summaryState = document.getElementById("summary-state");
+    const phase = document.getElementById("phase");
+    const progressBar = document.getElementById("progress-bar");
+    const resultPanel = document.getElementById("result");
+    const decisionButtons = [...document.querySelectorAll(".decision")];
+    let activeJob = null;
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        cache: "no-store",
+        headers: {"Content-Type": "application/json", ...(options.headers || {})},
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.detail || "Request failed");
+      return payload;
+    }
+
+    function updateProgress(progress) {
+      const phaseName = progress.phase === "validation" ? "Held-out validation" : progress.phase === "complete" ? "Complete" : "Calibration";
+      phase.innerHTML = `<strong>${phaseName}</strong><span>${progress.labeled} of ${progress.total}</span>`;
+      progressBar.style.width = `${Math.round(progress.labeled * 100 / progress.total)}%`;
+    }
+
+    function showJob(item) {
+      activeJob = item.job;
+      startState.hidden = true;
+      summaryState.hidden = true;
+      reviewState.hidden = false;
+      resultPanel.hidden = true;
+      decisionButtons.forEach(button => { button.disabled = false; });
+      document.getElementById("label-error").textContent = "";
+      document.getElementById("queue-position").textContent = `${item.split} ${item.split_position} of ${item.split_total}`;
+      document.getElementById("job-title").textContent = item.job.title || "Untitled role";
+      document.getElementById("job-company").textContent = item.job.company || "Unknown company";
+      document.getElementById("job-location").textContent = item.job.location || "Location unavailable";
+      document.getElementById("job-salary").textContent = item.job.salary_text || "Salary unavailable";
+      document.getElementById("job-source").textContent = item.job.source || "Unknown source";
+      document.getElementById("job-posted").textContent = item.job.posted_text || "Posting date unavailable";
+      document.getElementById("job-link").href = item.job.application_url || item.job.url;
+      document.getElementById("job-description").textContent = item.job.description || "No description available.";
+      window.scrollTo({top: 0, behavior: "instant"});
+    }
+
+    async function loadNext() {
+      const [progress, item] = await Promise.all([
+        api("/scoring/labels/session"),
+        api("/scoring/labels/next"),
+      ]);
+      updateProgress(progress);
+      if (item) return showJob(item);
+      reviewState.hidden = true;
+      summaryState.hidden = false;
+      const benchmark = await api("/scoring/benchmark?split=validation");
+      const percent = value => value === null ? "Unavailable" : `${Math.round(value * 100)}%`;
+      document.getElementById("accuracy").textContent = percent(benchmark.accuracy);
+      document.getElementById("balanced-accuracy").textContent = percent(benchmark.balanced_accuracy);
+      document.getElementById("reviewable-precision").textContent = percent(benchmark.reviewable_precision);
+    }
+
+    function showComparison(comparison) {
+      document.getElementById("actual-label").textContent = comparison.actual_label;
+      document.getElementById("predicted-label").textContent = comparison.predicted_label;
+      document.getElementById("score-line").textContent = `${comparison.fit_score} / ${comparison.confidence}`;
+      const dimensions = document.getElementById("dimensions");
+      dimensions.replaceChildren(...comparison.dimensions.map(item => {
+        const row = document.createElement("div");
+        row.className = "dimension";
+        const name = document.createElement("span");
+        name.textContent = item.name;
+        const value = document.createElement("strong");
+        value.textContent = `${item.score}/100`;
+        row.append(name, value);
+        return row;
+      }));
+      resultPanel.hidden = false;
+    }
+
+    async function submitLabel(label) {
+      if (!activeJob) return;
+      decisionButtons.forEach(button => { button.disabled = true; });
+      document.getElementById("label-error").textContent = "";
+      try {
+        const response = await api(`/scoring/labels/${activeJob.id}`, {
+          method: "POST",
+          body: JSON.stringify({label}),
+        });
+        updateProgress(response.progress);
+        if (response.comparison) showComparison(response.comparison);
+        else await loadNext();
+      } catch (error) {
+        document.getElementById("label-error").textContent = error.message;
+        decisionButtons.forEach(button => { button.disabled = false; });
+      }
+    }
+
+    document.getElementById("start-button").addEventListener("click", async () => {
+      const button = document.getElementById("start-button");
+      button.disabled = true;
+      document.getElementById("start-error").textContent = "";
+      try {
+        await api("/scoring/labels/session", {method: "POST"});
+        await loadNext();
+      } catch (error) {
+        document.getElementById("start-error").textContent = error.message;
+        button.disabled = false;
+      }
+    });
+    decisionButtons.forEach(button => button.addEventListener("click", () => submitLabel(button.dataset.label)));
+    document.getElementById("continue-button").addEventListener("click", async () => {
+      const button = document.getElementById("continue-button");
+      button.disabled = true;
+      try {
+        await loadNext();
+      } catch (error) {
+        document.getElementById("label-error").textContent = error.message;
+        button.disabled = false;
+      }
+    });
+
+    api("/scoring/labels/session")
+      .then(loadNext)
+      .catch(error => {
+        if (!error.message.includes("does not exist")) document.getElementById("start-error").textContent = error.message;
+      });
+  </script>
+</body>
+</html>
