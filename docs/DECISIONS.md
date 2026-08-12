@@ -233,3 +233,31 @@ remains in this file and links to the decision that replaced it.
 - Consequence: Scoring output is explainable and migration-safe, but accuracy is
   unproven until D011's real labels and held-out validation gate pass. The next
   milestone is labeling and benchmark evidence, not threshold tuning by anecdote.
+
+## D019 - Fixed blind scoring-label session
+
+- Status: accepted on 2026-08-12
+- Decision: The first real-job benchmark uses one fixed 75-job private queue:
+  25 calibration jobs and 50 held-out validation jobs. Each split contains
+  reject, review, and strong predictions in a fixed 43/20/12 allocation. Only
+  postings with at least 500 description characters qualify. Stable hashing
+  selects and interleaves jobs without exposing predictions through the review
+  API.
+- Decision: The queue freezes the complete posting snapshot and review URL shown
+  to the owner. A label is append-only and bound to that snapshot's fingerprint.
+  Queue creation is idempotent; duplicate labels, out-of-order decisions, and
+  snapshot-integrity failures do not rewrite benchmark history. Queue and label
+  writes share a cross-process lock, atomic replacement, and owner-only
+  permissions. A session fingerprint binds every frozen entry and review URL;
+  persisted labels must match the exact ordered queue prefix. Calibration and
+  validation score the snapshots instead of mutable live job rows.
+- Decision: The review surface is loopback-only. Calibration labels reveal the
+  current prediction after each decision so they can guide later tuning.
+  Validation predictions and metrics remain hidden until all 50 held-out jobs
+  are labeled. Changing the scoring profile after calibration does not resample
+  or rewrite either split.
+- Consequence: The benchmark supports honest held-out measurement and safe
+  restarts while the scheduler continues enriching live jobs. The allocation
+  favors materially complete posting data while still representing every
+  decision class; it does not estimate the natural prevalence of each class in
+  the complete job corpus.

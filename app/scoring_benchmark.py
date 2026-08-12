@@ -1,5 +1,6 @@
 import json
 import hashlib
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -26,6 +27,7 @@ class ScoringLabel(BaseModel):
     job_url: HttpUrl
     label: FitLabel
     split: BenchmarkSplit = "validation"
+    labeled_at: datetime | None = None
 
 
 def load_scoring_labels(path: Path) -> list[ScoringLabel]:

@@ -32,8 +32,12 @@ matches, bounded Adzuna/Remotive/Himalayas destination extraction, and manual
 handoff. Enrichment is operational for captured official payloads, Greenhouse
 and Lever APIs, and matching employer-page `JobPosting` JSON-LD. Approved
 JavaScript-dependent fallbacks use bounded read-only Playwright rendering.
-Scoring V2 is operational. The labeling benchmark, dashboard, and ATS assistance
-remain V1 work in progress.
+Scoring V2 and its loopback-only labeling workflow are operational. The fixed
+queue holds 25 calibration jobs followed by 50 held-out validation jobs. It
+interleaves score strata without exposing predictions, binds each decision to an
+immutable posting snapshot and fingerprint, and withholds validation results
+until the holdout is complete. Completing the real labels, the broader
+dashboard, and ATS assistance remain V1 work in progress.
 
 The resolver retains every incoming URL as provenance. LinkedIn, Indeed, and
 aggregator URLs remain discovery links; only validated public HTTPS employer/ATS
@@ -78,6 +82,24 @@ migrated in memory; schema v1 persisted scores are structurally backfilled by
 schema v6 and then deterministically rescored. Historical jobs made reviewable
 only by that upgrade are atomically recorded as Discord baselines, preventing a
 scoring release from creating a notification backlog.
+
+## Scoring Labels
+
+The scoring-review API and HTML surface accept only loopback clients with a
+local Host and Origin. The session queue and labels are separate private JSON
+files guarded by one cross-process lock and atomic owner-only replacement. The
+queue is deterministic and idempotent: restarting the API cannot silently
+resample the holdout. Each entry stores its split, complete posting snapshot,
+review URL, and posting fingerprint. Only snapshots with at least 500
+description characters qualify. A session-level fingerprint binds every queue
+entry and its review metadata. Persisted labels must be the exact ordered prefix
+of that queue. Recording fails if the snapshot or session integrity is
+invalid, the job was already labeled or not selected, or the decision was
+submitted out of order. Predicted labels are queue metadata but are never
+returned by the blind review endpoints. Calibration comparisons and validation
+benchmarks score the frozen snapshots, so later scheduler enrichment cannot
+change the sample. Calibration comparisons are available immediately;
+validation metrics unlock only when all 50 held-out decisions exist.
 
 ## Application Memory
 

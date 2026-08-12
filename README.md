@@ -91,9 +91,11 @@ approved read-only dynamic fallback before they are rescored. Application
 records require separate approval to start and submit.
 
 Scoring V2 now produces normalized role, seniority, skills, location, and risk
-dimensions with independent confidence and structured evidence. Real-job
-labeling, the review dashboard, and approved ATS assistance remain V1 work in
-progress. See the
+dimensions with independent confidence and structured evidence. A loopback-only
+review surface creates a fixed 25-job calibration set followed by 50 held-out
+validation jobs and stores private immutable labels. Completing those real-job
+labels, the broader review dashboard, and approved ATS assistance remain V1 work
+in progress. See the
 [V1 definition of done](docs/V1_ROADMAP.md) and
 [architecture](docs/ARCHITECTURE.md). Product, architecture, safety, and
 sequencing choices are retained in the
@@ -116,8 +118,14 @@ GET  /
 GET  /health
 GET  /jobs
 GET  /jobs/top
+GET  /scoring/review
+GET  /scoring/labels/session
+GET  /scoring/labels/next
+GET  /scoring/benchmark
 GET  /applications
 GET  /applications/pending
+POST /scoring/labels/session
+POST /scoring/labels/{job_id}
 POST /jobs
 POST /jobs/manual
 POST /scan/fake
@@ -443,9 +451,28 @@ cp config/candidate_profile.example.yaml credentials/candidate_profile.yaml
 chmod 600 credentials/candidate_profile.yaml
 ```
 
-Create a private label file from `config/scoring_labels.example.json`, assign real
-jobs to `strong`, `review`, or `reject`, and keep calibration labels separate from
-the held-out validation labels. Evaluate aggregate metrics with:
+Start the local API and open the scoring review surface:
+
+```bash
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+```text
+http://127.0.0.1:8000/scoring/review
+```
+
+The first action creates one deterministic private queue of complete immutable
+posting snapshots from current Scoring V2 jobs. It contains 25 calibration jobs
+and 50 validation jobs, with
+reject, review, and strong predictions interleaved and hidden during labeling.
+Only postings with at least 500 description characters qualify for selection.
+Calibration decisions reveal Jobbot's result after each label. Held-out
+predictions and aggregate validation metrics remain hidden until all 50
+validation jobs are labeled. Queue and label files are written atomically under
+`data/` with owner-only permissions. Later source enrichment cannot alter a
+selected snapshot or its benchmark result.
+
+Evaluate the completed labels from the terminal with:
 
 ```bash
 .venv/bin/python scripts/run_scoring_benchmark.py \
