@@ -19,7 +19,7 @@ from app.job_links import (
     validate_manual_application_url,
 )
 from app.models import JobPosting
-from app.scoring import score_job
+from app.scoring import score_job, scoring_fields
 from app.storage import JobStorage
 
 
@@ -624,13 +624,7 @@ def apply_enrichment(
     }
     posting_data = {**job, **updates}
     scored = score_job(JobPosting.model_validate(posting_data))
-    updates.update(
-        {
-            "fit_score": scored.score,
-            "score_reasons": scored.reasons,
-            "red_flags": scored.red_flags,
-        }
-    )
+    updates.update(scoring_fields(scored))
     return storage.update_job_enrichment(job["id"], updates)
 
 

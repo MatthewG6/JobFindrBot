@@ -62,6 +62,7 @@ def save_scored_job(
     storage: JobStorage,
     identifier: int,
     score: int,
+    scoring_version: int = 2,
 ) -> dict:
     return storage.save_job(
         {
@@ -71,6 +72,7 @@ def save_scored_job(
             "url": f"https://example.com/jobs/{identifier}",
             "source": "test",
             "fit_score": score,
+            "scoring_version": scoring_version,
             "score_reasons": ["Target role match: software engineer"],
             "red_flags": [],
         }
@@ -111,6 +113,21 @@ def test_discord_credentials_are_private_and_reject_symlinks(
     link.symlink_to(path)
     with pytest.raises(DiscordCredentialError):
         load_discord_webhook_url(link)
+
+
+def test_stale_high_score_is_not_discord_eligible(tmp_path: Path) -> None:
+    storage = JobStorage(tmp_path / "jobs.json")
+    client = RecordingClient()
+    assert run_discord_notifications(storage, client=client)["status"] == (
+        "initialized"
+    )
+    save_scored_job(storage, 999, 90, scoring_version=1)
+
+    summary = run_discord_notifications(storage, client=client)
+
+    assert summary["eligible_jobs"] == 0
+    assert summary["notifications_attempted"] == 0
+    assert client.jobs == []
 
 
 def test_missing_discord_credentials_are_not_configured(tmp_path: Path) -> None:
@@ -203,6 +220,39 @@ def test_job_payload_prefers_resolved_application_url() -> None:
 
     assert payload["embeds"][0]["url"] == (
         "https://careers.example.com/jobs/456/apply"
+    )
+
+
+def test_job_payload_includes_v2_confidence_and_dimension_breakdown() -> None:
+    payload = job_notification_payload(
+        {
+            "id": 1,
+            "title": "Junior Software Engineer",
+            "company": "Example",
+            "location": "Remote",
+            "fit_score": 82,
+            "score_confidence": 76,
+            "score_confidence_band": "high",
+            "score_dimensions": [
+                {"name": "role", "score": 100},
+                {"name": "seniority", "score": 100},
+                {"name": "skills", "score": 67},
+                {"name": "location", "score": 100},
+                {"name": "risk", "score": 100},
+            ],
+            "scoring_version": 2,
+        }
+    )
+
+    fields = {
+        field["name"]: field["value"]
+        for field in payload["embeds"][0]["fields"]
+    }
+    assert fields["Fit score"] == "82/100"
+    assert fields["Score confidence"] == "76/100 (high)"
+    assert fields["Fit breakdown"] == (
+        "Role 100 \\| Seniority 100 \\| Skills 67 \\| "
+        "Location 100 \\| Risk 100"
     )
 
 
@@ -447,6 +497,7 @@ def test_stored_job_id_cannot_override_database_id(tmp_path: Path) -> None:
             "company": "Example",
             "url": "https://example.com/corrupt-id",
             "fit_score": 50,
+            "scoring_version": 2,
         }
     )
 

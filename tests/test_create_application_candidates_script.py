@@ -23,6 +23,7 @@ def save_scored_job(
             "url": f"https://example.com/jobs/{slug}",
             "source": "test",
             "fit_score": fit_score,
+            "scoring_version": 2,
             "content_hash": slug,
         }
     )

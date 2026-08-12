@@ -918,7 +918,7 @@ def test_schema_five_backfills_dynamic_attempt_state(tmp_path: Path) -> None:
     storage = JobStorage(database_path)
     migrated = storage.list_jobs()[0]
 
-    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 5
+    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 6
     assert migrated["dynamic_resolution_attempt_count"] == 0
     assert migrated["dynamic_resolution_last_attempt_at"] is None
     assert migrated["dynamic_resolution_next_attempt_at"] is None

@@ -22,13 +22,15 @@ from app.models import (
     ApplicationStatus,
     InvalidApplicationTransition,
     JobPosting,
+    ScoreDimension,
+    ScoreEvidence,
     utc_now,
     validate_application_transition,
 )
 
 
 DEFAULT_DB_PATH = Path("data/jobs.json")
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 MIN_ENRICHED_DESCRIPTION_CHARS = 20
 DEFAULT_BACKUP_RETENTION = 14
 _DATABASE_LOCKS: dict[Path, "DatabaseLock"] = {}
@@ -399,6 +401,13 @@ class JobStorage:
                     doc_ids=[job.doc_id],
                 )
             return
+        if version == 6:
+            for job in self.jobs_table.all():
+                self.jobs_table.update(
+                    self._scoring_defaults(dict(job)),
+                    doc_ids=[job.doc_id],
+                )
+            return
         raise ValueError(f"Unsupported database migration: {version}")
 
     def schema_version(self) -> int:
@@ -691,6 +700,7 @@ class JobStorage:
         role = job_link_role(data.get("source"), data.get("url"))
         data.update(self._resolution_defaults(data, role))
         data.update(self._enrichment_defaults(data, role))
+        data.update(self._scoring_defaults(data))
         document_id = self.jobs_table.insert(data)
         self._register_job_link(document_id, data, role=role)
         self._register_source_record(document_id, data)
@@ -786,6 +796,27 @@ class JobStorage:
             "enrichment_last_attempt_at": None,
             "enrichment_next_attempt_at": None,
             "enrichment_error_type": None,
+        }
+
+    def _scoring_defaults(self, data: dict) -> dict:
+        fit_score = data.get("fit_score")
+        legacy_score = (
+            isinstance(fit_score, (int, float))
+            and not isinstance(fit_score, bool)
+        )
+        scoring_version = data.get("scoring_version")
+        if isinstance(scoring_version, bool) or not isinstance(
+            scoring_version,
+            int,
+        ):
+            scoring_version = 1 if legacy_score else None
+        return {
+            "score_confidence": data.get("score_confidence"),
+            "score_confidence_band": data.get("score_confidence_band"),
+            "score_dimensions": data.get("score_dimensions") or [],
+            "score_evidence": data.get("score_evidence") or [],
+            "scoring_version": scoring_version,
+            "score_review_threshold": data.get("score_review_threshold"),
         }
 
     def _register_source_record(
@@ -1046,6 +1077,12 @@ class JobStorage:
             "workplace_type",
             "apply_url",
             "fit_score",
+            "score_confidence",
+            "score_confidence_band",
+            "score_dimensions",
+            "score_evidence",
+            "scoring_version",
+            "score_review_threshold",
             "score_reasons",
             "red_flags",
             "enrichment_status",
@@ -1059,12 +1096,126 @@ class JobStorage:
         }
         if not updates or set(updates) - allowed:
             raise ValueError("Job enrichment update contains invalid fields")
+        scoring_keys = self._score_update_fields()
+        provided_scoring_keys = set(updates) & scoring_keys
+        if provided_scoring_keys:
+            if provided_scoring_keys != scoring_keys:
+                raise ValueError(
+                    "Job enrichment update contains incomplete scoring fields"
+                )
+            self._validate_job_score_updates(updates)
         with self._access():
             if self.jobs_table.get(doc_id=job_id) is None:
                 raise ValueError("Job does not exist")
             self.jobs_table.update(dict(updates), doc_ids=[job_id])
             refreshed = self.jobs_table.get(doc_id=job_id)
             return {**refreshed, "id": refreshed.doc_id}
+
+    def update_job_score(self, job_id: int, updates: dict) -> dict:
+        if set(updates) != self._score_update_fields():
+            raise ValueError("Job score update has invalid fields")
+        self._validate_job_score_updates(updates)
+        with self._access():
+            if self.jobs_table.get(doc_id=job_id) is None:
+                raise ValueError("Job does not exist")
+            self.jobs_table.update(dict(updates), doc_ids=[job_id])
+            refreshed = self.jobs_table.get(doc_id=job_id)
+            return {**refreshed, "id": refreshed.doc_id}
+
+    @staticmethod
+    def _score_update_fields() -> set[str]:
+        return {
+            "fit_score",
+            "score_confidence",
+            "score_confidence_band",
+            "score_dimensions",
+            "score_evidence",
+            "scoring_version",
+            "score_review_threshold",
+            "score_reasons",
+            "red_flags",
+        }
+
+    @staticmethod
+    def _validate_job_score_updates(updates: dict) -> None:
+        score = updates["fit_score"]
+        confidence = updates["score_confidence"]
+        dimensions = updates["score_dimensions"]
+        evidence = updates["score_evidence"]
+        review_threshold = updates["score_review_threshold"]
+        if (
+            isinstance(score, bool)
+            or not isinstance(score, int)
+            or not 0 <= score <= 100
+            or isinstance(confidence, bool)
+            or not isinstance(confidence, int)
+            or not 0 <= confidence <= 100
+            or updates["score_confidence_band"] not in {"low", "medium", "high"}
+            or updates["scoring_version"] != 2
+            or isinstance(review_threshold, bool)
+            or not isinstance(review_threshold, int)
+            or not 1 <= review_threshold <= 99
+            or not isinstance(dimensions, list)
+            or len(dimensions) != 5
+            or not isinstance(evidence, list)
+            or not isinstance(updates["score_reasons"], list)
+            or not isinstance(updates["red_flags"], list)
+        ):
+            raise ValueError("Job score update is invalid")
+        try:
+            validated_dimensions = [
+                ScoreDimension.model_validate(item) for item in dimensions
+            ]
+            validated_evidence = [
+                ScoreEvidence.model_validate(item) for item in evidence
+            ]
+        except ValueError as error:
+            raise ValueError("Job score update is invalid") from error
+        flattened_evidence = [
+            item.model_dump(mode="json")
+            for dimension in validated_dimensions
+            for item in dimension.evidence
+        ]
+        validated_evidence_data = [
+            item.model_dump(mode="json") for item in validated_evidence
+        ]
+        expected_confidence_band = (
+            "high"
+            if confidence >= 75
+            else "medium"
+            if confidence >= 50
+            else "low"
+        )
+        raw_score = round(
+            sum(item.weighted_points for item in validated_dimensions)
+        )
+        capped = (
+            not any(
+                item.dimension == "role" and item.kind == "match"
+                for item in validated_evidence
+            )
+            or any(
+                item.kind in {"exclusion", "risk"}
+                for item in validated_evidence
+            )
+        )
+        expected_score = (
+            min(raw_score, review_threshold - 1) if capped else raw_score
+        )
+        if (
+            [item.name for item in validated_dimensions]
+            != ["role", "seniority", "skills", "location", "risk"]
+            or sum(item.weight for item in validated_dimensions) != 100
+            or flattened_evidence != validated_evidence_data
+            or any(
+                item.weighted_points
+                != round(item.score * item.weight / 100, 2)
+                for item in validated_dimensions
+            )
+            or updates["score_confidence_band"] != expected_confidence_band
+            or score != expected_score
+        ):
+            raise ValueError("Job score update is invalid")
 
     def list_top_jobs(self) -> list[dict]:
         return sorted(
@@ -1326,6 +1477,47 @@ class JobStorage:
                 {**notification, "id": notification.doc_id}
                 for notification in notifications
             ]
+
+    def baseline_job_notifications(
+        self,
+        channel: str,
+        job_ids: list[int],
+    ) -> int:
+        if not isinstance(channel, str) or not channel.strip():
+            raise ValueError("Notification channel is invalid")
+        if not isinstance(job_ids, list) or any(
+            isinstance(job_id, bool)
+            or not isinstance(job_id, int)
+            or job_id < 1
+            for job_id in job_ids
+        ):
+            raise ValueError("Notification job IDs are invalid")
+        channel = channel.strip()
+        inserted = 0
+        with self._access():
+            notifications = Query()
+            now = utc_now().isoformat()
+            for job_id in dict.fromkeys(job_ids):
+                if self.jobs_table.get(doc_id=job_id) is None:
+                    raise ValueError("Job does not exist")
+                existing = self.job_notifications_table.get(
+                    (notifications.channel == channel)
+                    & (notifications.job_id == job_id)
+                )
+                if existing is not None:
+                    continue
+                self.job_notifications_table.insert(
+                    {
+                        "channel": channel,
+                        "job_id": job_id,
+                        "status": "baseline",
+                        "attempts": 0,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                )
+                inserted += 1
+        return inserted
 
     def list_attention_required_notifications(
         self,

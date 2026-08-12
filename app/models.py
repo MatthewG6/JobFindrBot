@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, HttpUrl, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, StringConstraints
 
 
 def utc_now() -> datetime:
@@ -26,9 +26,41 @@ class JobPosting(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+ScoreDimensionName = Literal["role", "seniority", "skills", "location", "risk"]
+ScoreEvidenceKind = Literal["match", "exclusion", "risk"]
+ScoreEvidenceSource = Literal["title", "location", "description"]
+ScoreConfidenceBand = Literal["low", "medium", "high"]
+
+
+class ScoreEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dimension: ScoreDimensionName
+    kind: ScoreEvidenceKind
+    signal: str
+    source: ScoreEvidenceSource
+
+
+class ScoreDimension(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: ScoreDimensionName
+    score: int = Field(ge=0, le=100)
+    weight: int = Field(ge=0, le=100)
+    weighted_points: float = Field(ge=0, le=100)
+    summary: str
+    evidence: list[ScoreEvidence] = Field(default_factory=list)
+
+
 class ScoredJob(BaseModel):
     job: JobPosting
-    score: int
+    score: int = Field(ge=0, le=100)
+    confidence: int = Field(ge=0, le=100)
+    confidence_band: ScoreConfidenceBand
+    dimensions: list[ScoreDimension]
+    evidence: list[ScoreEvidence]
+    scoring_version: int = Field(ge=1)
+    review_threshold: int = Field(ge=1, le=99)
     reasons: list[str] = Field(default_factory=list)
     red_flags: list[str] = Field(default_factory=list)
 

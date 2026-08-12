@@ -32,7 +32,8 @@ matches, bounded Adzuna/Remotive/Himalayas destination extraction, and manual
 handoff. Enrichment is operational for captured official payloads, Greenhouse
 and Lever APIs, and matching employer-page `JobPosting` JSON-LD. Approved
 JavaScript-dependent fallbacks use bounded read-only Playwright rendering.
-Scoring V2, the dashboard, and ATS assistance remain V1 work in progress.
+Scoring V2 is operational. The labeling benchmark, dashboard, and ATS assistance
+remain V1 work in progress.
 
 The resolver retains every incoming URL as provenance. LinkedIn, Indeed, and
 aggregator URLs remain discovery links; only validated public HTTPS employer/ATS
@@ -56,6 +57,27 @@ requests are allowed; the validated hostname is pinned to a public address and
 all other resource classes and browser communication APIs are blocked. Provider
 resolution is limited to the D016 sources. Employer enrichment requires an
 explicit domain allowlist entry and a rendered posting identity match.
+
+## Scoring
+
+Scoring V2 is a deterministic, versioned model with normalized 0-to-100 role,
+seniority, skills, location, and risk dimensions. The configured weights total
+100. Phrase-boundary matching avoids partial-word hits, aliases are deduplicated,
+and title-level seniority exclusions are evaluated in the title so ordinary
+description language does not create a disqualification. Missing role evidence,
+excluded seniority, or explicit candidate risk caps the fit score below review.
+
+Confidence is calculated independently from fit using posting completeness and
+evidence coverage. Each score stores its dimensions, matching or exclusion
+evidence, confidence band, scoring version, and the review threshold used for
+hard caps. The storage boundary recomputes the expected normalized or capped
+result before accepting any score update. Initial ingestion and successful
+enrichment use the same scorer. After enrichment, the scheduler upgrades stale
+scores before Discord selects notifications. Schema v1 candidate profiles are
+migrated in memory; schema v1 persisted scores are structurally backfilled by
+schema v6 and then deterministically rescored. Historical jobs made reviewable
+only by that upgrade are atomically recorded as Discord baselines, preventing a
+scoring release from creating a notification backlog.
 
 ## Application Memory
 
@@ -93,6 +115,9 @@ provenance. This allows richer official-board data to update a job first found i
 an email without losing where either record came from. Schema v4 adds provider
 resolution attempt counts, timestamps, cooldowns, and sanitized outcome types.
 Schema v5 adds separate dynamic-resolution attempts and cooldowns.
+Schema v6 adds scoring version, confidence, dimensions, and evidence. The
+migration does not reinterpret legacy fit values; the scheduler's scoring stage
+performs that separate deterministic upgrade before notifications.
 
 Backup SHA-256 sidecars detect accidental corruption. They are not authenticated
 and do not defend against a malicious local user who can rewrite both files; V1's

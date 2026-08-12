@@ -90,7 +90,9 @@ Greenhouse and Lever APIs, static employer-page `JobPosting` JSON-LD, or an
 approved read-only dynamic fallback before they are rescored. Application
 records require separate approval to start and submit.
 
-Scoring V2, the review dashboard, and approved ATS assistance remain V1 work in
+Scoring V2 now produces normalized role, seniority, skills, location, and risk
+dimensions with independent confidence and structured evidence. Real-job
+labeling, the review dashboard, and approved ATS assistance remain V1 work in
 progress. See the
 [V1 definition of done](docs/V1_ROADMAP.md) and
 [architecture](docs/ARCHITECTURE.md). Product, architecture, safety, and
@@ -425,13 +427,16 @@ duplicate can enrich an email-discovered record without another network request.
 Schema v4 stores bounded provider-resolution attempts, cooldowns, and sanitized
 outcome types.
 Schema v5 stores separate dynamic-resolution attempts and cooldowns.
+Schema v6 adds the Scoring V2 version, confidence, dimensions, and evidence.
 
 ## Candidate Profile and Scoring Benchmark
 
-Personal role, technology, location, penalty, weight, and threshold settings live
+Personal role, technology, location, seniority, risk, weight, and threshold settings live
 in the private `credentials/candidate_profile.yaml`, created from
-`config/candidate_profile.example.yaml`. The current values preserve legacy scoring
-behavior until Scoring V2 is implemented and calibrated.
+`config/candidate_profile.example.yaml`. Legacy schema v1 profiles are migrated
+in memory to the schema v2 scoring model; the private source file is not rewritten.
+A legacy profile must include at least one actual target role in addition to
+seniority terms such as `junior`, because V2 scores those as separate dimensions.
 
 ```bash
 cp config/candidate_profile.example.yaml credentials/candidate_profile.yaml
@@ -450,6 +455,17 @@ the held-out validation labels. Evaluate aggregate metrics with:
 
 Jobbot will not claim a scoring accuracy rate until enough real validation labels
 exist and the benchmark demonstrates it.
+
+Scoring V2 is deterministic and bounded from 0 to 100. It combines five weighted
+dimensions: role 30%, seniority 15%, skills 30%, location 15%, and risk 10%.
+Missing role evidence, an excluded seniority requirement, or an explicit risk
+caps the result below the review threshold. Confidence is a separate 0-to-100
+measure of posting completeness and evidence coverage; it is not fit. Every
+score also stores the review threshold used to apply hard caps, allowing the
+storage boundary to verify the exact result. Every scheduled run upgrades stale
+scores before Discord notifications are selected.
+Historical jobs upgraded solely by the migration are baselined atomically so a
+version rollout cannot flood the review channel; newly ingested jobs are not.
 
 ## Discord Notifications
 

@@ -36,11 +36,27 @@ class ScoringWeights(BaseModel):
 class ScoringThresholds(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    review: StrictInt
-    strong: StrictInt
+    review: StrictInt = Field(ge=1, le=99)
+    strong: StrictInt = Field(ge=2, le=100)
 
 
-class CandidateProfile(BaseModel):
+class ScoringDimensionWeights(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: StrictInt = Field(ge=0, le=100)
+    seniority: StrictInt = Field(ge=0, le=100)
+    skills: StrictInt = Field(ge=0, le=100)
+    location: StrictInt = Field(ge=0, le=100)
+    risk: StrictInt = Field(ge=0, le=100)
+
+    @model_validator(mode="after")
+    def validate_total(self) -> "ScoringDimensionWeights":
+        if sum(self.model_dump().values()) != 100:
+            raise ValueError("Scoring dimension weights must total 100")
+        return self
+
+
+class LegacyCandidateProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: StrictInt
@@ -76,9 +92,50 @@ class CandidateProfile(BaseModel):
             raise ValueError("Candidate profile keywords must be unique")
         return normalized
 
+
+class CandidateProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: StrictInt
+    profile_name: str = Field(min_length=1)
+    approval_name: str = Field(min_length=1)
+    target_role_keywords: list[str] = Field(min_length=1)
+    target_technology_keywords: list[str] = Field(min_length=1)
+    preferred_location_keywords: list[str] = Field(min_length=1)
+    preferred_seniority_keywords: list[str] = Field(min_length=1)
+    excluded_seniority_keywords: list[str] = Field(default_factory=list)
+    risk_keywords: list[str] = Field(default_factory=list)
+    dimension_weights: ScoringDimensionWeights
+    thresholds: ScoringThresholds
+
+    @field_validator("profile_name", "approval_name")
+    @classmethod
+    def validate_profile_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Profile name must not be blank")
+        return value
+
+    @field_validator(
+        "target_role_keywords",
+        "target_technology_keywords",
+        "preferred_location_keywords",
+        "preferred_seniority_keywords",
+        "excluded_seniority_keywords",
+        "risk_keywords",
+    )
+    @classmethod
+    def normalize_keywords(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip().lower() for value in values]
+        if any(not value for value in normalized):
+            raise ValueError("Candidate profile keywords must not be blank")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("Candidate profile keywords must be unique")
+        return normalized
+
     @model_validator(mode="after")
     def validate_threshold_order(self) -> "CandidateProfile":
-        if self.schema_version != 1:
+        if self.schema_version != 2:
             raise ValueError("Unsupported candidate profile schema version")
         if self.thresholds.strong <= self.thresholds.review:
             raise ValueError("Strong threshold must be above review threshold")
@@ -94,7 +151,85 @@ def load_candidate_profile(
         raise ValueError("Candidate profile is not readable YAML") from error
     if not isinstance(content, dict):
         raise ValueError("Candidate profile must be a YAML object")
+    if content.get("schema_version") == 1:
+        return migrate_legacy_candidate_profile(
+            LegacyCandidateProfile.model_validate(content)
+        )
     return CandidateProfile.model_validate(content)
+
+
+PREFERRED_SENIORITY_SIGNALS = (
+    "entry level",
+    "entry-level",
+    "junior",
+    "new grad",
+)
+LEGACY_EXCLUDED_SENIORITY_SIGNALS = frozenset(
+    {
+        "architect",
+        "lead",
+        "manager",
+        "principal",
+        "senior",
+        "staff",
+        "5+ years",
+        "6+ years",
+        "7+ years",
+        "8+ years",
+        "9+ years",
+        "10+ years",
+    }
+)
+DEFAULT_DIMENSION_WEIGHTS = ScoringDimensionWeights(
+    role=30,
+    seniority=15,
+    skills=30,
+    location=15,
+    risk=10,
+)
+
+
+def migrate_legacy_candidate_profile(
+    legacy: LegacyCandidateProfile,
+) -> CandidateProfile:
+    if legacy.schema_version != 1:
+        raise ValueError("Unsupported candidate profile schema version")
+    seniority_aliases = {
+        value.replace("-", " ") for value in PREFERRED_SENIORITY_SIGNALS
+    }
+    role_keywords = [
+        value
+        for value in legacy.target_role_keywords
+        if value.strip().lower().replace("-", " ") not in seniority_aliases
+    ]
+    if not role_keywords:
+        raise ValueError(
+            "Legacy candidate profile must include a target role beyond "
+            "seniority keywords"
+        )
+    excluded = [
+        value
+        for value in legacy.red_flag_keywords
+        if value.strip().lower() in LEGACY_EXCLUDED_SENIORITY_SIGNALS
+    ]
+    risks = [
+        value
+        for value in legacy.red_flag_keywords
+        if value.strip().lower() not in LEGACY_EXCLUDED_SENIORITY_SIGNALS
+    ]
+    return CandidateProfile(
+        schema_version=2,
+        profile_name=legacy.profile_name,
+        approval_name=legacy.approval_name,
+        target_role_keywords=role_keywords,
+        target_technology_keywords=legacy.target_technology_keywords,
+        preferred_location_keywords=legacy.preferred_location_keywords,
+        preferred_seniority_keywords=list(PREFERRED_SENIORITY_SIGNALS),
+        excluded_seniority_keywords=excluded,
+        risk_keywords=risks,
+        dimension_weights=DEFAULT_DIMENSION_WEIGHTS,
+        thresholds=legacy.thresholds,
+    )
 
 
 def configured_candidate_profile_path(

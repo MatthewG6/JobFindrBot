@@ -237,7 +237,7 @@ def test_schema_two_migrates_existing_jobs_and_links(tmp_path: Path) -> None:
     storage = JobStorage(database_path)
     job = storage.list_jobs()[0]
 
-    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 5
+    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 6
     assert job["resolution_status"] == "resolved"
     assert job["application_url"] == job["url"]
     assert storage.list_job_links(job["id"])[0]["role"] == "official"
@@ -751,7 +751,7 @@ def test_schema_four_backfills_resolution_attempt_state(tmp_path: Path) -> None:
     storage = JobStorage(database_path)
     migrated = storage.list_jobs()[0]
 
-    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 5
+    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 6
     assert migrated["resolution_attempt_count"] == 0
     assert migrated["resolution_last_attempt_at"] is None
     assert migrated["resolution_next_attempt_at"] is None

@@ -76,6 +76,16 @@ def test_scheduler_metric_is_structured_and_sanitized() -> None:
             "jobs_failed": 0,
             "errors": [],
         },
+        "scoring": {
+            "jobs_considered": 8,
+            "jobs_eligible": 3,
+            "jobs_attempted": 2,
+            "jobs_rescored": 2,
+            "jobs_notification_baselined": 1,
+            "jobs_deferred": 1,
+            "jobs_failed": 0,
+            "errors": [],
+        },
         "discord": {
             "status": "ok",
             "eligible_jobs": 5,
@@ -99,6 +109,9 @@ def test_scheduler_metric_is_structured_and_sanitized() -> None:
     assert metric["enrichment"]["jobs_enriched"] == 1
     assert metric["enrichment"]["jobs_already_enriched"] == 5
     assert metric["dynamic_enrichment"]["jobs_unapproved"] == 1
+    assert metric["scoring"]["jobs_rescored"] == 2
+    assert metric["scoring"]["jobs_notification_baselined"] == 1
+    assert metric["scoring"]["jobs_deferred"] == 1
     assert "summary" not in metric["sources"]["remotive"]
 
 

@@ -5,6 +5,8 @@ resolves them to official employer postings where possible, produces evidence-
 based fit scores, supports human review, and assists with applications without
 submitting anything without explicit approval.
 
+Current checklist completion after Scoring V2: **22 of 44 items (50%)**.
+
 ## Definition of Done
 
 ### Discovery and operations
@@ -31,8 +33,8 @@ submitting anything without explicit approval.
 
 - [x] Store candidate preferences in a validated profile
 - [x] Provide calibration and validation benchmark tooling
-- [ ] Replace keyword accumulation with normalized Scoring V2 dimensions
-- [ ] Store fit score, confidence score, evidence, and scoring version
+- [x] Replace keyword accumulation with normalized Scoring V2 dimensions
+- [x] Store fit score, confidence score, evidence, and scoring version
 - [ ] Label at least 50 real jobs, including a held-out validation set
 - [ ] Demonstrate at least 60% validation accuracy before making that claim
 - [ ] Target at least 70% precision for jobs sent to the review inbox
@@ -68,16 +70,15 @@ submitting anything without explicit approval.
 
 ## Ordered Backlog
 
-1. Build Scoring V2 dimensions, confidence, evidence, and version migration
-2. Build the labeling workflow and held-out scoring benchmark
-3. Add the focused local review and labeling dashboard
-4. Implement D015, including key recovery, backup purge, and its sensitive-data
+1. Build the labeling workflow and held-out scoring benchmark
+2. Add the focused local review and labeling dashboard
+3. Implement D015, including key recovery, backup purge, and its sensitive-data
    restore drill
-5. Add the private application profile and approved document catalog
-6. Add structured answer memory, Discord non-sensitive question approvals, and
+4. Add the private application profile and approved document catalog
+5. Add structured answer memory, Discord non-sensitive question approvals, and
    owner-only local sensitive input
-7. Add approved ATS form-assistance adapters and final review package
-8. Rehearse restore, complete release QA, and publish V1 documentation
+6. Add approved ATS form-assistance adapters and final review package
+7. Rehearse restore, complete release QA, and publish V1 documentation
 
 ## Later Versions
 

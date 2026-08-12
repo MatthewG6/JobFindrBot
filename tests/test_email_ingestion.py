@@ -570,6 +570,13 @@ def test_email_ingestion_scores_dedupes_and_marks_message_processed(
     assert second_result["already_processed"] is True
     assert len(storage.list_jobs()) == 2
     assert all("fit_score" in job for job in storage.list_jobs())
+    assert all(job["scoring_version"] == 2 for job in storage.list_jobs())
+    assert all(
+        len(job["score_dimensions"]) == 5 for job in storage.list_jobs()
+    )
+    assert all(
+        0 <= job["score_confidence"] <= 100 for job in storage.list_jobs()
+    )
     assert len(storage.list_processed_emails()) == 1
     assert storage.list_processed_emails()[0]["message_id"] == (
         "fake-indeed-message-1"

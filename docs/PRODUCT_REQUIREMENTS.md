@@ -80,6 +80,21 @@ confirmation, or missing information is required.
 - If Discord is unavailable, the assistant must pause at the next decision or
   submission boundary rather than make decisions on Matthew's behalf.
 
+## Job Scoring
+
+- Fit is a deterministic 0-to-100 result composed of normalized role,
+  seniority, skills, location, and risk dimensions.
+- Confidence is a separate 0-to-100 measure of source completeness and evidence
+  coverage. A high fit score must not imply high confidence.
+- Every score retains structured matching, exclusion, and risk evidence plus a
+  scoring version so it can be explained and migrated.
+- Missing target-role evidence, excluded seniority or experience, and explicit
+  candidate risk keep a job below the review threshold.
+- The same scoring contract applies at ingestion and after official-posting
+  enrichment. Stale versions are upgraded before Discord notification selection.
+- Jobbot must not claim scoring accuracy until at least 50 real jobs are labeled
+  and a separate held-out validation split supports the claim.
+
 ## Answer Memory
 
 The system should maintain a structured answer library rather than relying only

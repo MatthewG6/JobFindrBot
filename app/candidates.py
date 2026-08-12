@@ -28,7 +28,10 @@ def create_application_candidates(
 
     for job in jobs:
         fit_score = job.get("fit_score", 0)
-        if not qualifies_for_application(fit_score, threshold):
+        if job.get("scoring_version") != 2 or not qualifies_for_application(
+            fit_score,
+            threshold,
+        ):
             continue
 
         if job["id"] in existing_job_ids:
