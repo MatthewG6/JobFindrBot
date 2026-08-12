@@ -92,13 +92,17 @@ def test_labeling_routes_create_blind_session_and_record_calibration_label(
     )
 
     assert missing.status_code == 404
+    assert missing.headers["cache-control"] == "no-store"
     assert created.status_code == 200
+    assert created.headers["cache-control"] == "no-store"
     assert created.json()["total"] == 75
     assert next_response.status_code == 200
+    assert next_response.headers["cache-control"] == "no-store"
     assert next_payload["split"] == "calibration"
     assert "fit_score" not in next_payload["job"]
     assert "score_dimensions" not in next_payload["job"]
     assert labeled.status_code == 200
+    assert labeled.headers["cache-control"] == "no-store"
     assert labeled.json()["decision"]["label"] == "strong"
     assert labeled.json()["comparison"]["predicted_label"] in {
         "reject",
@@ -112,6 +116,14 @@ def test_labeling_routes_create_blind_session_and_record_calibration_label(
         json={"label": "reject"},
     )
     assert duplicate.status_code == 409
+    assert duplicate.headers["cache-control"] == "no-store"
+
+    calibration = client.get(
+        "/scoring/benchmark",
+        params={"split": "calibration"},
+    )
+    assert calibration.status_code == 200
+    assert calibration.headers["cache-control"] == "no-store"
 
 
 def test_validation_results_are_not_available_early(tmp_path: Path) -> None:
@@ -121,6 +133,7 @@ def test_validation_results_are_not_available_early(tmp_path: Path) -> None:
     response = client.get("/scoring/benchmark", params={"split": "validation"})
 
     assert response.status_code == 409
+    assert response.headers["cache-control"] == "no-store"
     assert "hidden" in response.json()["detail"].lower()
 
 

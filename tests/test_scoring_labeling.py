@@ -245,6 +245,49 @@ def test_progress_rejects_label_metadata_tampering(tmp_path: Path) -> None:
         labeling_progress(store)
 
 
+def test_progress_rejects_skipped_or_reordered_label_prefix(
+    tmp_path: Path,
+) -> None:
+    store = ScoringLabelStore(
+        queue_path=tmp_path / "queue.json",
+        labels_path=tmp_path / "labels.json",
+    )
+    jobs = make_session_jobs()
+    session = create_labeling_session(jobs, store, PROFILE)
+    second = session.entries[1]
+    store.labels_path.write_text(
+        json.dumps(
+            [
+                {
+                    "job_id": second.job_id,
+                    "posting_fingerprint": second.posting_fingerprint,
+                    "job_url": str(second.job_url),
+                    "label": "review",
+                    "split": second.split,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="exact session prefix"):
+        labeling_progress(store)
+
+    store.labels_path.unlink()
+    for entry in session.entries[:2]:
+        record_scoring_label(
+            store,
+            job_id=entry.job_id,
+            label="review",
+        )
+    content = json.loads(store.labels_path.read_text(encoding="utf-8"))
+    store.labels_path.write_text(
+        json.dumps(list(reversed(content))),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="exact session prefix"):
+        labeling_progress(store)
+
+
 def test_progress_rejects_queue_snapshot_tampering(tmp_path: Path) -> None:
     store = ScoringLabelStore(
         queue_path=tmp_path / "queue.json",
@@ -256,6 +299,41 @@ def test_progress_rejects_queue_snapshot_tampering(tmp_path: Path) -> None:
     store.queue_path.write_text(json.dumps(content), encoding="utf-8")
 
     with pytest.raises(ValueError, match="snapshot"):
+        labeling_progress(store)
+
+
+def test_progress_rejects_review_url_or_stratum_tampering(tmp_path: Path) -> None:
+    store = ScoringLabelStore(
+        queue_path=tmp_path / "queue.json",
+        labels_path=tmp_path / "labels.json",
+    )
+    create_labeling_session(make_session_jobs(), store, PROFILE)
+    original = json.loads(store.queue_path.read_text(encoding="utf-8"))
+
+    changed_url = json.loads(json.dumps(original))
+    changed_url["entries"][0]["review_url"] = "https://example.com/changed"
+    store.queue_path.write_text(json.dumps(changed_url), encoding="utf-8")
+    with pytest.raises(ValueError, match="session fingerprint"):
+        labeling_progress(store)
+
+    same_label_by_split = {}
+    for index, entry in enumerate(original["entries"]):
+        same_label_by_split[(entry["predicted_label"], entry["split"])] = index
+    pair = next(
+        (
+            same_label_by_split[(label, "calibration")],
+            same_label_by_split[(label, "validation")],
+        )
+        for label in ("reject", "review", "strong")
+        if (label, "calibration") in same_label_by_split
+        and (label, "validation") in same_label_by_split
+    )
+    changed_split = json.loads(json.dumps(original))
+    first, second = pair
+    changed_split["entries"][first]["split"] = "validation"
+    changed_split["entries"][second]["split"] = "calibration"
+    store.queue_path.write_text(json.dumps(changed_split), encoding="utf-8")
+    with pytest.raises(ValueError, match="session fingerprint"):
         labeling_progress(store)
 
 

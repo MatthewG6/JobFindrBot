@@ -50,6 +50,14 @@ class ScoringLabelRequest(BaseModel):
     label: Literal["reject", "review", "strong"]
 
 
+@app.middleware("http")
+async def prevent_scoring_response_caching(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/scoring/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 def get_storage() -> JobStorage:
     return JobStorage()
 

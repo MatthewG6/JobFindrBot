@@ -91,7 +91,9 @@ files guarded by one cross-process lock and atomic owner-only replacement. The
 queue is deterministic and idempotent: restarting the API cannot silently
 resample the holdout. Each entry stores its split, complete posting snapshot,
 review URL, and posting fingerprint. Only snapshots with at least 500
-description characters qualify. Recording fails if the snapshot integrity is
+description characters qualify. A session-level fingerprint binds every queue
+entry and its review metadata. Persisted labels must be the exact ordered prefix
+of that queue. Recording fails if the snapshot or session integrity is
 invalid, the job was already labeled or not selected, or the decision was
 submitted out of order. Predicted labels are queue metadata but are never
 returned by the blind review endpoints. Calibration comparisons and validation

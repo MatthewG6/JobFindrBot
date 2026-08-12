@@ -87,6 +87,7 @@ class LabelingSession(BaseModel):
     schema_version: StrictInt
     created_at: datetime
     entries: list[QueueEntry]
+    session_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class LabelingProgress(BaseModel):
@@ -245,6 +246,8 @@ def _load_session(path: Path) -> LabelingSession:
             or str(entry.posting.url) != str(entry.job_url)
         ):
             raise ValueError("Scoring labeling session snapshot is invalid")
+    if session_fingerprint(session.entries) != session.session_fingerprint:
+        raise ValueError("Scoring labeling session fingerprint is invalid")
     return session
 
 
@@ -263,11 +266,12 @@ def _validate_session_labels(
     session: LabelingSession,
     labels: list[ScoringLabel],
 ) -> list[ScoringLabel]:
-    entries = {entry.job_id: entry for entry in session.entries}
-    for label in labels:
-        entry = entries.get(label.job_id)
-        if entry is None:
-            raise ValueError("Scoring label is not part of the fixed session")
+    if len(labels) > len(session.entries):
+        raise ValueError("Scoring labels exceed the fixed session")
+    for position, label in enumerate(labels):
+        entry = session.entries[position]
+        if label.job_id != entry.job_id:
+            raise ValueError("Scoring labels must be the exact session prefix")
         if (
             label.posting_fingerprint != entry.posting_fingerprint
             or str(label.job_url) != str(entry.job_url)
@@ -281,6 +285,17 @@ def _stable_job_order(job: dict) -> str:
     posting = JobPosting.model_validate(job)
     fingerprint = posting_fingerprint(posting)
     return hashlib.sha256(f"jobbot-labeling-v1:{fingerprint}".encode()).hexdigest()
+
+
+def session_fingerprint(entries: list[QueueEntry]) -> str:
+    payload = [entry.model_dump(mode="json") for entry in entries]
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _stable_entry_order(
@@ -381,6 +396,7 @@ def create_labeling_session(
             schema_version=QUEUE_SCHEMA_VERSION,
             created_at=datetime.now(UTC),
             entries=entries,
+            session_fingerprint=session_fingerprint(entries),
         )
         store.write_session(session)
         return session

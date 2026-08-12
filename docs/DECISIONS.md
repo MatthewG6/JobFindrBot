@@ -248,8 +248,9 @@ remains in this file and links to the decision that replaced it.
   Queue creation is idempotent; duplicate labels, out-of-order decisions, and
   snapshot-integrity failures do not rewrite benchmark history. Queue and label
   writes share a cross-process lock, atomic replacement, and owner-only
-  permissions. Calibration and validation score the snapshots instead of mutable
-  live job rows.
+  permissions. A session fingerprint binds every frozen entry and review URL;
+  persisted labels must match the exact ordered queue prefix. Calibration and
+  validation score the snapshots instead of mutable live job rows.
 - Decision: The review surface is loopback-only. Calibration labels reveal the
   current prediction after each decision so they can guide later tuning.
   Validation predictions and metrics remain hidden until all 50 held-out jobs
