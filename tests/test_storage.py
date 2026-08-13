@@ -263,10 +263,26 @@ def test_score_validation_rejects_forged_strong_threshold(tmp_path: Path) -> Non
 def test_score_validation_recomputes_required_location_uncertainty(
     tmp_path: Path,
 ) -> None:
-    from app.candidate_profile import default_candidate_profile
+    from app.candidate_profile import load_candidate_profile
     from app.scoring import score_job, scoring_fields
 
-    profile = default_candidate_profile()
+    profile = load_candidate_profile(
+        Path("config/candidate_profile.example.yaml")
+    ).model_copy(
+        update={
+            "preferred_location_keywords": [
+                "remote",
+                "rochester",
+                "united states",
+                "usa",
+                "u.s.",
+            ],
+            "remote_or_hybrid_required_regions": [
+                "twin_cities_seven_county"
+            ],
+            "require_preferred_location_for_strong": True,
+        }
+    )
     posting = JobPosting(
         title="Junior Software Engineer",
         company="Example Company",
@@ -291,4 +307,4 @@ def test_score_validation_recomputes_required_location_uncertainty(
     )
 
     with pytest.raises(ValueError, match="invalid"):
-        storage.update_job_score(saved["id"], updates)
+        storage.update_job_score(saved["id"], updates, profile=profile)

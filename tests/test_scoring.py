@@ -4,7 +4,6 @@ import pytest
 
 from app.candidate_profile import (
     ScoringThresholds,
-    default_candidate_profile,
     load_candidate_profile,
 )
 from app.models import JobPosting
@@ -337,6 +336,24 @@ def constrained_twin_cities_profile():
     )
 
 
+def strict_v1_location_profile():
+    return PROFILE.model_copy(
+        update={
+            "preferred_location_keywords": [
+                "remote",
+                "rochester",
+                "united states",
+                "usa",
+                "u.s.",
+            ],
+            "remote_or_hybrid_required_regions": [
+                "twin_cities_seven_county"
+            ],
+            "require_preferred_location_for_strong": True,
+        }
+    )
+
+
 @pytest.mark.parametrize(
     ("location", "description"),
     [
@@ -541,16 +558,17 @@ def test_allowed_location_policy_rejects_false_preferred_evidence(
     location: str,
     description: str,
 ) -> None:
+    profile = strict_v1_location_profile()
     scored = score_job(
         make_job(
             "Junior Software Engineer",
             description + " Build Java React TypeScript systems.",
             location=location,
         ),
-        default_candidate_profile(),
+        profile,
     )
 
-    assert scored.score < default_candidate_profile().thresholds.strong
+    assert scored.score < profile.thresholds.strong
 
 
 @pytest.mark.parametrize(
