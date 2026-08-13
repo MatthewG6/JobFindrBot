@@ -71,9 +71,17 @@ def test_wrong_key_is_rejected_without_disclosing_plaintext() -> None:
 class FakeSecurityRunner:
     def __init__(self) -> None:
         self.key: str | None = None
+        self.find_error: int | None = None
 
     def __call__(self, command, **kwargs):
         if "find-generic-password" in command:
+            if self.find_error is not None:
+                return subprocess.CompletedProcess(
+                    command,
+                    self.find_error,
+                    "",
+                    "keychain error",
+                )
             if self.key is None:
                 return subprocess.CompletedProcess(command, 44, "", "missing")
             return subprocess.CompletedProcess(command, 0, f"{self.key}\n", "")
@@ -113,6 +121,19 @@ def test_initialize_does_not_replace_a_malformed_existing_key(
         MacOSKeychainStore(runner=runner).initialize()
 
     assert runner.key == "not-a-valid-key"
+
+
+def test_initialize_does_not_treat_keychain_access_failure_as_missing(
+    monkeypatch,
+) -> None:
+    runner = FakeSecurityRunner()
+    runner.find_error = 128
+    monkeypatch.setattr("app.sensitive_data.platform.system", lambda: "Darwin")
+
+    with pytest.raises(SensitiveDataError, match="Unable to read"):
+        MacOSKeychainStore(runner=runner).initialize()
+
+    assert runner.key is None
 
 
 def test_recovery_rejects_world_readable_and_tampered_packages(

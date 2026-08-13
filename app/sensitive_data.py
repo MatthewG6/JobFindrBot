@@ -191,9 +191,13 @@ class MacOSKeychainStore:
             text=True,
             check=False,
         )
-        if result.returncode != 0:
+        if result.returncode == 44:
             raise SensitiveDataKeyUnavailable(
                 "Jobbot sensitive-data key is not available in macOS Keychain"
+            )
+        if result.returncode != 0:
+            raise SensitiveDataError(
+                "Unable to read Jobbot sensitive-data key from macOS Keychain"
             )
         return self._decode_key(result.stdout.strip())
 
@@ -202,8 +206,12 @@ class MacOSKeychainStore:
             return SensitiveValueCipher(self.load_key())
         except SensitiveDataKeyUnavailable:
             key = secrets.token_bytes(32)
-            self._store_key(key)
-            return SensitiveValueCipher(key)
+            try:
+                self._store_key(key, update=False)
+                return SensitiveValueCipher(key)
+            except SensitiveDataError:
+                # A concurrent initializer may have won the create race.
+                return SensitiveValueCipher(self.load_key())
 
     def export_recovery(self, path: Path) -> str:
         key = self.load_key()
@@ -226,7 +234,7 @@ class MacOSKeychainStore:
     def restore_recovery(self, path: Path) -> str:
         key = self.load_recovery_key(path)
         cipher = SensitiveValueCipher(key)
-        self._store_key(key)
+        self._store_key(key, update=True)
         return cipher.key_id
 
     def load_recovery_key(self, path: Path) -> bytes:
@@ -254,21 +262,27 @@ class MacOSKeychainStore:
             raise SensitiveDataError("Recovery package checksum is invalid")
         return key
 
-    def _store_key(self, key: bytes) -> None:
+    def _store_key(self, key: bytes, *, update: bool) -> None:
         self._require_macos()
         encoded = base64.urlsafe_b64encode(key).decode("ascii")
-        result = self._runner(
+        command = [
+            "/usr/bin/security",
+            "add-generic-password",
+        ]
+        if update:
+            command.append("-U")
+        command.extend(
             [
-                "/usr/bin/security",
-                "add-generic-password",
-                "-U",
                 "-s",
                 self.service,
                 "-a",
                 self.account,
                 "-w",
                 encoded,
-            ],
+            ]
+        )
+        result = self._runner(
+            command,
             capture_output=True,
             text=True,
             check=False,
