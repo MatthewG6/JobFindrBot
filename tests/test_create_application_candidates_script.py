@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.candidates import DEFAULT_APPLICATION_THRESHOLD
+from app.scoring import SCORING_VERSION
 from app.storage import JobStorage
 from scripts.create_application_candidates import (
     parse_args,
@@ -23,7 +24,7 @@ def save_scored_job(
             "url": f"https://example.com/jobs/{slug}",
             "source": "test",
             "fit_score": fit_score,
-            "scoring_version": 2,
+            "scoring_version": SCORING_VERSION,
             "content_hash": slug,
         }
     )

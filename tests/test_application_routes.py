@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.main import CANDIDATE_PROFILE, app, get_storage
 from app.models import ApplicationStatus
+from app.scoring import SCORING_VERSION
 from app.storage import JobStorage
 
 
@@ -36,7 +37,7 @@ def save_job(
             "url": f"https://example.com/jobs/{slug}",
             "source": "test",
             "fit_score": fit_score,
-            "scoring_version": 2,
+            "scoring_version": SCORING_VERSION,
             "content_hash": slug,
         }
     )
@@ -100,6 +101,33 @@ def test_list_pending_applications_only_returns_waiting_records(
     assert len(applications) == 1
     assert applications[0]["application_id"] == pending_application["id"]
     assert applications[0]["status"] == "awaiting_start_approval"
+
+
+def test_pending_and_approval_reject_job_that_is_no_longer_strong(
+    tmp_path: Path,
+) -> None:
+    client, storage = make_test_client(tmp_path)
+    saved_job = save_job(storage, "Former Strong Match", 90)
+    application = storage.create_application(saved_job["id"])
+    storage.jobs_table.update(
+        {"fit_score": 39, "scoring_version": SCORING_VERSION},
+        doc_ids=[saved_job["id"]],
+    )
+
+    pending_response = client.get("/applications/pending")
+    approve_response = client.post(
+        f"/applications/{application['id']}/approve"
+    )
+
+    assert pending_response.status_code == 200
+    assert pending_response.json() == []
+    assert approve_response.status_code == 409
+    assert approve_response.json() == {
+        "detail": "Application job is no longer a current Strong match"
+    }
+    assert storage.get_application(application["id"])["status"] == (
+        "awaiting_start_approval"
+    )
 
 
 def test_application_records_include_job_context(tmp_path: Path) -> None:
@@ -192,15 +220,30 @@ def test_create_application_candidates_route_supports_threshold(
     tmp_path: Path,
 ) -> None:
     client, storage = make_test_client(tmp_path)
-    save_job(storage, "Custom Threshold Match", 70)
+    save_job(storage, "Custom Threshold Match", 95)
 
-    response = client.post("/applications/candidates?threshold=70")
+    response = client.post("/applications/candidates?threshold=90")
     summary = response.json()
 
     assert response.status_code == 201
-    assert summary["threshold"] == 70
+    assert summary["threshold"] == 90
     assert summary["created_count"] == 1
     assert summary["candidates"][0]["job_title"] == "Custom Threshold Match"
+
+
+def test_create_application_candidates_route_rejects_below_strong_threshold(
+    tmp_path: Path,
+) -> None:
+    client, storage = make_test_client(tmp_path)
+    save_job(storage, "Below Strong Match", 70)
+
+    response = client.post("/applications/candidates?threshold=70")
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Application threshold cannot be below Strong"
+    }
+    assert storage.list_applications() == []
 
 
 def test_create_application_candidates_route_does_not_duplicate_records(

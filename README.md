@@ -417,7 +417,7 @@ python scripts/install_launchd_scheduler.py
 ```
 
 The installer reloads the LaunchAgent, starts it immediately, and waits for a
-successful background preflight. This preflight also detects macOS privacy
+successful background preflight for up to five minutes. This preflight also detects macOS privacy
 restrictions that could block a background process from accessing the project
 under `Desktop`.
 
@@ -445,6 +445,18 @@ in the private `credentials/candidate_profile.yaml`, created from
 in memory to the schema v2 scoring model; the private source file is not rewritten.
 A legacy profile must include at least one actual target role in addition to
 seniority terms such as `junior`, because V2 scores those as separate dimensions.
+Locations listed under `remote_or_hybrid_required_location_keywords` are
+conditional: confirmed remote or hybrid work receives full location credit,
+explicit onsite work is rejected, and an unspecified arrangement remains Review
+until verified. Every constrained location must also appear in
+`preferred_location_keywords`. Location matching tolerates punctuation aliases
+such as `St Paul`/`St. Paul` and state spelling such as `MN`/`Minnesota`. The
+private profile selects `twin_cities_seven_county` under
+`remote_or_hybrid_required_regions`. Its state-aware locality catalog covers the
+metro's cities and county names so an explicitly out-of-state namesake does not
+activate the rule. With `require_preferred_location_for_strong` enabled, a job
+without evidence for remote work, Rochester, the United States, or the selected
+metro region cannot become Strong.
 
 ```bash
 cp config/candidate_profile.example.yaml credentials/candidate_profile.yaml
@@ -487,16 +499,29 @@ prevents an official claim. Session benchmarks use the predictions frozen into
 the integrity-bound queue, so later profile tuning cannot rewrite a completed
 baseline.
 
-Scoring V2 is deterministic and bounded from 0 to 100. It combines five weighted
+Scoring V2 is deterministic and bounded from 0 to 100. Scoring metadata version 3
+adds work-arrangement constraints and forces saved version-2 jobs through the
+bounded rescore stage. The model combines five weighted
 dimensions: role 30%, seniority 15%, skills 30%, location 15%, and risk 10%.
 Missing role evidence, an excluded seniority requirement, or an explicit risk
-caps the result below the review threshold. Confidence is a separate 0-to-100
+caps the result below the review threshold. An explicit onsite conflict at a
+remote-or-hybrid-required location does the same; an unspecified arrangement is
+capped below Strong. Confidence is a separate 0-to-100
 measure of posting completeness and evidence coverage; it is not fit. Every
-score also stores the review threshold used to apply hard caps, allowing the
-storage boundary to verify the exact result. Every scheduled run upgrades stale
+score also stores the review and Strong thresholds used to apply caps, allowing
+the storage boundary to verify the exact result. Every scheduled run upgrades stale
 scores before Discord notifications are selected.
 Historical jobs upgraded solely by the migration are baselined atomically so a
 version rollout cannot flood the review channel; newly ingested jobs are not.
+Structured `workplace_type` data takes precedence over fallback text parsing.
+Fallback parsing rejects explicit onsite and unavailable-remote language, accepts
+affirmative hybrid schedules that include onsite days, and ignores negated or
+technical uses such as `not a hybrid role`, `hybrid cloud`, and `remote access`.
+Incidental onsite interviews, meetings, and customer visits do not override an
+affirmative remote arrangement. Candidate creation thresholds may be raised but
+cannot be lowered below the active Strong threshold.
+An existing application candidate is hidden from Pending and cannot be approved
+if its current job score/version no longer qualifies as Strong.
 
 ## Discord Notifications
 

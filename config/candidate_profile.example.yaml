@@ -27,6 +27,10 @@ preferred_location_keywords:
   - saint paul
   - twin cities
 
+remote_or_hybrid_required_location_keywords: []
+remote_or_hybrid_required_regions: []
+require_preferred_location_for_strong: false
+
 preferred_seniority_keywords:
   - entry level
   - entry-level

@@ -30,6 +30,9 @@ def test_default_candidate_profile_preserves_scoring_contract() -> None:
     assert profile.thresholds.strong == 75
     assert profile.schema_version == 2
     assert sum(profile.dimension_weights.model_dump().values()) == 100
+    assert profile.remote_or_hybrid_required_location_keywords == []
+    assert profile.remote_or_hybrid_required_regions == []
+    assert profile.require_preferred_location_for_strong is False
     assert scored.score == 100
 
 
@@ -120,6 +123,22 @@ unexpected: true
     )
 
     with pytest.raises(ValueError):
+        load_candidate_profile(path)
+
+
+def test_candidate_profile_requires_constrained_locations_to_be_preferred(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "profile.yaml"
+    content = Path("config/candidate_profile.example.yaml").read_text(
+        encoding="utf-8"
+    ).replace(
+        "remote_or_hybrid_required_location_keywords: []",
+        "remote_or_hybrid_required_location_keywords: [chicago]",
+    )
+    path.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must also be preferred"):
         load_candidate_profile(path)
 
 

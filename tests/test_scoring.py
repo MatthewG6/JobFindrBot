@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from app.candidate_profile import ScoringThresholds, load_candidate_profile
+from app.candidate_profile import (
+    ScoringThresholds,
+    default_candidate_profile,
+    load_candidate_profile,
+)
 from app.models import JobPosting
 from app.scoring import (
     MAX_RESCORE_BATCH,
@@ -43,7 +47,7 @@ def test_strong_match_has_normalized_dimensions_and_evidence() -> None:
     assert scored.score == 100
     assert 0 <= scored.confidence <= 100
     assert scored.confidence_band == "medium"
-    assert scored.scoring_version == SCORING_VERSION == 2
+    assert scored.scoring_version == SCORING_VERSION == 3
     assert scored.review_threshold == PROFILE.thresholds.review
     assert [item.name for item in scored.dimensions] == [
         "role",
@@ -323,6 +327,360 @@ def test_hard_cap_tracks_configured_review_threshold() -> None:
     scored = score_job(make_job("Business Analyst"), profile)
 
     assert scored.score <= 19
+
+
+def constrained_twin_cities_profile():
+    return PROFILE.model_copy(
+        update={
+            "remote_or_hybrid_required_location_keywords": ["minneapolis"]
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("location", "description"),
+    [
+        (
+            "Minneapolis, MN",
+            "Hybrid schedule with three onsite days. Build React TypeScript "
+            "cloud systems.",
+        ),
+        (
+            "Remote - Minneapolis, MN",
+            "Build React TypeScript cloud systems.",
+        ),
+    ],
+)
+def test_required_location_accepts_confirmed_remote_or_hybrid(
+    location: str,
+    description: str,
+) -> None:
+    scored = score_job(
+        make_job("Junior Software Engineer", description, location=location),
+        constrained_twin_cities_profile(),
+    )
+
+    assert scored.score >= PROFILE.thresholds.strong
+    assert next(
+        item.summary for item in scored.dimensions if item.name == "location"
+    ) == "Required remote or hybrid arrangement is confirmed"
+
+
+def test_required_location_rejects_explicit_onsite_work() -> None:
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            "This is a fully onsite role. Build React TypeScript cloud systems.",
+            location="Minneapolis, MN",
+        ),
+        constrained_twin_cities_profile(),
+    )
+
+    assert scored.score < PROFILE.thresholds.review
+    assert "Red flag: onsite at remote-or-hybrid-required location" in (
+        scored.red_flags
+    )
+
+
+@pytest.mark.parametrize("onsite_text", ["fully onsite", "not remote"])
+def test_required_location_rejects_onsite_conflict_with_remote_location(
+    onsite_text: str,
+) -> None:
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            f"This position is {onsite_text}. Build React TypeScript systems.",
+            location="Remote - Minneapolis, MN",
+        ),
+        constrained_twin_cities_profile(),
+    )
+
+    assert scored.score < PROFILE.thresholds.review
+
+
+def test_required_location_matches_st_paul_without_period() -> None:
+    profile = PROFILE.model_copy(
+        update={
+            "preferred_location_keywords": [
+                *PROFILE.preferred_location_keywords,
+                "st. paul",
+            ],
+            "remote_or_hybrid_required_location_keywords": ["st. paul"],
+        }
+    )
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            "This position is fully onsite. Build React TypeScript systems.",
+            location="St Paul, MN",
+        ),
+        profile,
+    )
+
+    assert scored.score < PROFILE.thresholds.review
+
+
+def test_required_metro_city_matches_spelled_out_minnesota() -> None:
+    profile = PROFILE.model_copy(
+        update={
+            "preferred_location_keywords": [
+                *PROFILE.preferred_location_keywords,
+                "eagan mn",
+            ],
+            "remote_or_hybrid_required_location_keywords": ["eagan mn"],
+        }
+    )
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            "This position is fully onsite. Build React TypeScript systems.",
+            location="Eagan, Minnesota",
+        ),
+        profile,
+    )
+
+    assert scored.score < PROFILE.thresholds.review
+
+
+@pytest.mark.parametrize(
+    "location",
+    ["Andover, Minnesota", "Wayzata, MN", "Champlin, MN", "Minnetrista, MN"],
+)
+def test_required_region_rejects_onsite_metro_municipalities(
+    location: str,
+) -> None:
+    profile = PROFILE.model_copy(
+        update={
+            "remote_or_hybrid_required_regions": [
+                "twin_cities_seven_county"
+            ]
+        }
+    )
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            "This is a fully onsite role. Build React TypeScript systems.",
+            location=location,
+        ),
+        profile,
+    )
+
+    assert scored.score < PROFILE.thresholds.review
+
+
+def test_required_region_does_not_match_minneapolis_kansas() -> None:
+    profile = PROFILE.model_copy(
+        update={
+            "remote_or_hybrid_required_regions": [
+                "twin_cities_seven_county"
+            ]
+        }
+    )
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            "This is a fully onsite role. Build React TypeScript systems.",
+            location="Minneapolis, Kansas",
+        ),
+        profile,
+    )
+
+    assert "onsite at remote-or-hybrid-required location" not in " ".join(
+        scored.red_flags
+    )
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "Minneapolis Kansas",
+        "Minneapolis KS",
+        "Shakopee, Iowa",
+        "Washington County WI",
+    ],
+)
+def test_required_preferred_location_caps_out_of_region_namesakes(
+    location: str,
+) -> None:
+    profile = PROFILE.model_copy(
+        update={
+            "preferred_location_keywords": [
+                "remote",
+                "rochester",
+                "united states",
+            ],
+            "remote_or_hybrid_required_regions": [
+                "twin_cities_seven_county"
+            ],
+            "require_preferred_location_for_strong": True,
+        }
+    )
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            "This is a fully onsite role. Build React TypeScript systems.",
+            location=location,
+        ),
+        profile,
+    )
+
+    assert PROFILE.thresholds.review <= scored.score < PROFILE.thresholds.strong
+
+
+@pytest.mark.parametrize(
+    ("location", "description"),
+    [
+        ("Madison, WI", "Onsite role supporting remote access systems."),
+        ("Minneapolis, KS", "This onsite role is not remote."),
+        ("London, England", "Onsite role; US work authorization required."),
+        ("Remote - Canada", "Remote role building React systems."),
+        ("Toronto, Ontario, Canada", "Remote role building React systems."),
+    ],
+)
+def test_allowed_location_policy_rejects_false_preferred_evidence(
+    location: str,
+    description: str,
+) -> None:
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            description + " Build Java React TypeScript systems.",
+            location=location,
+        ),
+        default_candidate_profile(),
+    )
+
+    assert scored.score < default_candidate_profile().thresholds.strong
+
+
+@pytest.mark.parametrize(
+    ("workplace_type", "expected_eligible"),
+    [("remote", True), ("hybrid", True), ("onsite", False)],
+)
+def test_required_location_uses_structured_workplace_type_first(
+    workplace_type: str,
+    expected_eligible: bool,
+) -> None:
+    posting = make_job(
+        "Junior Software Engineer",
+        "Build React TypeScript cloud systems.",
+        location="Minneapolis, MN",
+    ).model_copy(update={"workplace_type": workplace_type})
+
+    scored = score_job(posting, constrained_twin_cities_profile())
+
+    assert (scored.score >= PROFILE.thresholds.strong) is expected_eligible
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "This is not a hybrid role. Build React TypeScript systems.",
+        "Remote work is not available. Build React TypeScript systems.",
+        "Remote work is prohibited. Build React TypeScript systems.",
+        "This employer does not offer remote work. Build React systems.",
+        "Hybrid work is not offered. Build React TypeScript systems.",
+        "There is no option for remote work. Build React systems.",
+        "Build a hybrid cloud system with remote access management.",
+        "Provide technical support to remote employees using React systems.",
+    ],
+)
+def test_required_location_does_not_accept_negated_or_technical_work_terms(
+    description: str,
+) -> None:
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            description,
+            location="Minneapolis, MN",
+        ),
+        constrained_twin_cities_profile(),
+    )
+
+    assert scored.score < PROFILE.thresholds.strong
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Remote role with occasional onsite customer support.",
+        "Remote position with an onsite interview.",
+        "Remote work with quarterly onsite meetings.",
+    ],
+)
+def test_incidental_onsite_language_does_not_override_remote_arrangement(
+    description: str,
+) -> None:
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            description + " Build React TypeScript systems.",
+            location="Minneapolis, MN",
+        ),
+        constrained_twin_cities_profile(),
+    )
+
+    assert scored.score >= PROFILE.thresholds.strong
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "No remote or hybrid work is available.",
+        "This role does not offer remote or hybrid schedules.",
+        "Neither remote nor hybrid work is available.",
+        "We do not support remote/hybrid work.",
+        "This is an onsite-only position.",
+        "Employees must be onsite.",
+        "Onsite attendance is required.",
+        "Must work in the office.",
+    ],
+)
+def test_arrangement_level_prohibitions_reject_constrained_location(
+    description: str,
+) -> None:
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            description + " Build React TypeScript systems.",
+            location="Minneapolis, MN",
+        ),
+        constrained_twin_cities_profile(),
+    )
+
+    assert scored.score < PROFILE.thresholds.review
+
+
+def test_required_location_without_arrangement_stays_below_strong() -> None:
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            "Build React TypeScript cloud systems.",
+            location="Minneapolis, MN",
+        ),
+        constrained_twin_cities_profile(),
+    )
+
+    assert PROFILE.thresholds.review <= scored.score < PROFILE.thresholds.strong
+    assert next(
+        item.summary for item in scored.dimensions if item.name == "location"
+    ) == "Remote or hybrid arrangement is not confirmed"
+
+
+def test_unconstrained_rochester_onsite_role_remains_eligible() -> None:
+    scored = score_job(
+        make_job(
+            "Junior Software Engineer",
+            "This is a fully onsite role. Build React TypeScript cloud systems.",
+            location="Rochester, Minnesota",
+        ),
+        constrained_twin_cities_profile(),
+    )
+
+    assert scored.score >= PROFILE.thresholds.strong
+    assert "onsite at remote-or-hybrid-required location" not in " ".join(
+        scored.red_flags
+    )
 
 
 def test_sparse_posting_has_low_confidence_independent_of_fit() -> None:

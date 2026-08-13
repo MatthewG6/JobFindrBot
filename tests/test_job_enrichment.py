@@ -131,7 +131,7 @@ def test_duplicate_official_payload_enriches_without_network(
     assert enriched["enrichment_method"] == "captured_official_payload"
     assert "React and TypeScript" in enriched["description"]
     assert enriched["fit_score"] > provider["fit_score"]
-    assert enriched["scoring_version"] == 2
+    assert enriched["scoring_version"] == 3
     assert len(enriched["score_dimensions"]) == 5
     assert isinstance(enriched["score_evidence"], list)
     assert len(storage.list_job_source_records(provider["id"])) == 2

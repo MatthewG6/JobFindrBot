@@ -2,21 +2,28 @@ import re
 from typing import TYPE_CHECKING, Iterable, Literal
 
 from app.candidate_profile import CandidateProfile, default_candidate_profile
+from app.location_regions import (
+    is_rochester_minnesota_location,
+    is_twin_cities_seven_county_location,
+    is_us_location,
+)
 from app.models import (
     JobPosting,
     ScoreDimension,
     ScoreDimensionName,
     ScoreEvidence,
     ScoredJob,
+    PREFERRED_LOCATION_UNCONFIRMED_SIGNAL,
+    WORK_ARRANGEMENT_UNCONFIRMED_SIGNAL,
 )
 
 if TYPE_CHECKING:
     from app.storage import JobStorage
 
 
-SCORING_VERSION = 2
+SCORING_VERSION = 3
 MAX_RESCORE_BATCH = 1_000
-SourceName = Literal["title", "location", "description"]
+SourceName = Literal["title", "location", "description", "workplace_type"]
 EXPERIENCE_NUMBER_WORDS = {
     "five": 5,
     "six": 6,
@@ -30,16 +37,97 @@ EXPERIENCE_PATTERN = re.compile(
     r"[\s-]*(?:\+\s*)?(?:years?|yrs?)(?![a-z0-9])",
     re.IGNORECASE,
 )
+REMOTE_WORK_SIGNALS = (
+    "remote",
+    "work from home",
+    "work-from-home",
+    "telecommute",
+)
+HYBRID_WORK_SIGNALS = ("hybrid",)
+ONSITE_LOCATION_SIGNALS = (
+    "onsite",
+    "on-site",
+    "on site",
+    "in-office",
+    "in office",
+    "office-based",
+    "office based",
+)
+ONSITE_DESCRIPTION_SIGNALS = (
+    "fully onsite",
+    "100% onsite",
+    "not remote",
+    "no remote work",
+    "remote work is not available",
+    "remote work unavailable",
+    "remote unavailable",
+)
+NEGATED_WORK_PREFIX = re.compile(
+    r"(?:\bnot|\bno|\bnon|\bisn't|\bis not|\bdoesn't offer|"
+    r"\bdoes not offer|\bno option for)[\s-]+(?:a[\s-]+)?$",
+    re.IGNORECASE,
+)
+UNAVAILABLE_WORK_SUFFIX = re.compile(
+    r"^.{0,30}\b(?:not[\s-]+available|not[\s-]+offered|unavailable|"
+    r"prohibited|not[\s-]+permitted)\b",
+    re.IGNORECASE,
+)
+REMOTE_TECHNICAL_FOLLOWERS = re.compile(
+    r"^[\s-]+(?:access|administration|client|connectivity|control|customer|"
+    r"desktop|device|employee|management|monitoring|network|repository|"
+    r"server|site|support|system|user|worker|workforce)s?\b",
+    re.IGNORECASE,
+)
+HYBRID_TECHNICAL_FOLLOWERS = re.compile(
+    r"^[\s-]+(?:application|architecture|cloud|deployment|infrastructure|"
+    r"network|solution|system|technology)\b",
+    re.IGNORECASE,
+)
+ONSITE_ARRANGEMENT_PATTERN = re.compile(
+    r"(?:\b(?:role|position|job|schedule|workplace|work[\s-]+arrangement)"
+    r"\s+(?:is|will[\s-]+be|requires?)[\s-]+(?:fully[\s-]+)?"
+    r"(?:onsite|on[\s-]+site|in[\s-]+office|office[\s-]+based)\b)"
+    r"|(?:\b(?:onsite|on[\s-]+site|in[\s-]+office|office[\s-]+based)"
+    r"[\s-]+(?:role|position|job|schedule|workplace|work[\s-]+arrangement)\b)"
+    r"|(?:\bwork(?:ing)?[\s-]+(?:fully[\s-]+)?(?:onsite|on[\s-]+site|"
+    r"in[\s-]+office)\b)"
+    r"|(?:\b(?:five|5)[\s-]+days?(?:[\s-]+per[\s-]+week)?[\s-]+"
+    r"(?:onsite|on[\s-]+site|in[\s-]+office)\b)"
+    r"|(?:\b(?:onsite|on[\s-]+site|in[\s-]+office)[^.!?;]{0,24}"
+    r"\b(?:five|5)[\s-]+days?\b)"
+    r"|(?:\b(?:onsite|on[\s-]+site|in[\s-]+office)[\s-]*only\b)"
+    r"|(?:\b(?:employees?|candidates?|workers?|you)[^.!?;]{0,16}"
+    r"\bmust[\s-]+(?:be|work)[\s-]+(?:onsite|on[\s-]+site|"
+    r"in[\s-]+(?:the[\s-]+)?office)\b)"
+    r"|(?:\b(?:onsite|on[\s-]+site|in[\s-]+office)[\s-]+"
+    r"(?:attendance[\s-]+)?is[\s-]+required\b)"
+    r"|(?:\bmust[\s-]+work[\s-]+(?:onsite|on[\s-]+site|"
+    r"in[\s-]+(?:the[\s-]+)?office)\b)",
+    re.IGNORECASE,
+)
+UNAVAILABLE_REMOTE_HYBRID_PATTERN = re.compile(
+    r"(?:\b(?:no|neither)[\s-]+remote(?:[\s/]+or|[\s/]+nor|/)"
+    r"[\s-]*hybrid\b[^.!?;]{0,40}\b(?:available|offered|supported|"
+    r"permitted|allowed|option|work|schedules?)\b)"
+    r"|(?:\b(?:does[\s-]+not|do[\s-]+not|doesn't|don't)[\s-]+"
+    r"(?:offer|support|allow|permit)[^.!?;]{0,20}\bremote"
+    r"(?:[\s/]+or|[\s/]+nor|/)[\s-]*hybrid\b)",
+    re.IGNORECASE,
+)
 
 
 def signal_pattern(signal: str) -> re.Pattern[str]:
-    parts = [re.escape(part) for part in re.split(r"[\s-]+", signal) if part]
-    expression = r"[\s-]+".join(parts)
+    parts = [
+        re.escape(part)
+        for part in re.split(r"[^a-z0-9+#]+", signal.lower())
+        if part
+    ]
+    expression = r"[^a-z0-9+#]+".join(parts)
     return re.compile(rf"(?<![a-z0-9]){expression}(?![a-z0-9])", re.IGNORECASE)
 
 
 def canonical_signal(signal: str) -> str:
-    return re.sub(r"[\s-]+", "", signal.strip().lower())
+    return re.sub(r"[^a-z0-9+#]+", "", signal.strip().lower())
 
 
 def matching_evidence(
@@ -68,6 +156,109 @@ def matching_evidence(
                 seen.add(canonical)
                 break
     return evidence
+
+
+def positive_work_evidence(
+    *,
+    signals: Iterable[str],
+    fields: tuple[tuple[SourceName, str], ...],
+    technical_followers: re.Pattern[str],
+) -> list[ScoreEvidence]:
+    evidence = []
+    seen = set()
+    for signal in signals:
+        canonical = canonical_signal(signal)
+        if canonical in seen:
+            continue
+        pattern = signal_pattern(signal)
+        for source, text in fields:
+            for match in pattern.finditer(text):
+                prefix = text[max(0, match.start() - 24) : match.start()]
+                suffix = text[match.end() : match.end() + 48]
+                if (
+                    NEGATED_WORK_PREFIX.search(prefix)
+                    or UNAVAILABLE_WORK_SUFFIX.search(suffix)
+                    or technical_followers.search(suffix)
+                ):
+                    continue
+                evidence.append(
+                    ScoreEvidence(
+                        dimension="location",
+                        kind="match",
+                        signal=signal,
+                        source=source,
+                    )
+                )
+                seen.add(canonical)
+                break
+            if canonical in seen:
+                break
+    return evidence
+
+
+def onsite_work_evidence(location: str, description: str) -> list[ScoreEvidence]:
+    evidence = matching_evidence(
+        dimension="location",
+        kind="exclusion",
+        signals=ONSITE_LOCATION_SIGNALS,
+        fields=(("location", location),),
+    )
+    extend_unique_evidence(
+        evidence,
+        matching_evidence(
+            dimension="location",
+            kind="exclusion",
+            signals=ONSITE_DESCRIPTION_SIGNALS,
+            fields=(("description", description),),
+        ),
+    )
+    arrangement_match = ONSITE_ARRANGEMENT_PATTERN.search(description)
+    if arrangement_match is not None:
+        extend_unique_evidence(
+            evidence,
+            [
+                ScoreEvidence(
+                    dimension="location",
+                    kind="exclusion",
+                    signal=arrangement_match.group(0),
+                    source="description",
+                )
+            ],
+        )
+    unavailable_match = UNAVAILABLE_REMOTE_HYBRID_PATTERN.search(description)
+    if unavailable_match is not None:
+        extend_unique_evidence(
+            evidence,
+            [
+                ScoreEvidence(
+                    dimension="location",
+                    kind="exclusion",
+                    signal=unavailable_match.group(0),
+                    source="description",
+                )
+            ],
+        )
+    return evidence
+
+
+def extend_unique_evidence(
+    evidence: list[ScoreEvidence],
+    additions: Iterable[ScoreEvidence],
+) -> None:
+    seen = {
+        (item.dimension, item.kind, canonical_signal(item.signal), item.source)
+        for item in evidence
+    }
+    for item in additions:
+        key = (
+            item.dimension,
+            item.kind,
+            canonical_signal(item.signal),
+            item.source,
+        )
+        if key not in seen:
+            evidence.append(item)
+            seen.add(key)
 
 
 def configured_experience_floor(signals: Iterable[str]) -> int | None:
@@ -349,14 +540,145 @@ def score_job(
     location_field_match = any(
         item.source == "location" for item in location_evidence
     )
-    location_score = 100 if location_field_match else 75 if location_evidence else 40
-    location_summary = (
-        "Preferred location appears in the location field"
-        if location_field_match
-        else "Preferred location appears only in the description"
-        if location_evidence
-        else "No preferred location evidence"
+    normalized_required_location = re.sub(
+        r"\bminnesota\b",
+        "mn",
+        location,
+        flags=re.IGNORECASE,
     )
+    required_location_evidence = matching_evidence(
+        dimension="location",
+        kind="match",
+        signals=profile.remote_or_hybrid_required_location_keywords,
+        fields=(("location", normalized_required_location),),
+    )
+    if (
+        "twin_cities_seven_county"
+        in profile.remote_or_hybrid_required_regions
+        and is_twin_cities_seven_county_location(location)
+    ):
+        extend_unique_evidence(
+            required_location_evidence,
+            [
+                ScoreEvidence(
+                    dimension="location",
+                    kind="match",
+                    signal="twin cities seven-county metro",
+                    source="location",
+                )
+            ],
+        )
+    remote_evidence = positive_work_evidence(
+        signals=REMOTE_WORK_SIGNALS,
+        fields=(("location", location), ("description", description)),
+        technical_followers=REMOTE_TECHNICAL_FOLLOWERS,
+    )
+    hybrid_evidence = positive_work_evidence(
+        signals=HYBRID_WORK_SIGNALS,
+        fields=(("location", location), ("description", description)),
+        technical_followers=HYBRID_TECHNICAL_FOLLOWERS,
+    )
+    onsite_evidence = onsite_work_evidence(location, description)
+    structured_workplace = canonical_signal(job.workplace_type or "")
+    structured_arrangement = {
+        "remote": "remote",
+        "workfromhome": "remote",
+        "hybrid": "hybrid",
+        "onsite": "onsite",
+        "inoffice": "onsite",
+    }.get(structured_workplace)
+    if structured_arrangement is not None:
+        structured_evidence = ScoreEvidence(
+            dimension="location",
+            kind=(
+                "exclusion" if structured_arrangement == "onsite" else "match"
+            ),
+            signal=structured_arrangement,
+            source="workplace_type",
+        )
+        if structured_arrangement == "remote":
+            remote_evidence.insert(0, structured_evidence)
+        elif structured_arrangement == "hybrid":
+            hybrid_evidence.insert(0, structured_evidence)
+        else:
+            onsite_evidence.insert(0, structured_evidence)
+
+    if structured_arrangement is not None:
+        arrangement = structured_arrangement
+    elif onsite_evidence:
+        arrangement = "onsite"
+    elif hybrid_evidence:
+        arrangement = "hybrid"
+    elif remote_evidence:
+        arrangement = "remote"
+    else:
+        arrangement = None
+    arrangement_confirmed = arrangement in {"remote", "hybrid"}
+    location_constraint_failed = False
+    location_constraint_unconfirmed = False
+    preferred_location_unconfirmed = False
+
+    if required_location_evidence and arrangement_confirmed:
+        location_score = 100
+        location_summary = "Required remote or hybrid arrangement is confirmed"
+        extend_unique_evidence(location_evidence, required_location_evidence)
+        extend_unique_evidence(location_evidence, hybrid_evidence)
+        extend_unique_evidence(location_evidence, remote_evidence)
+    elif required_location_evidence and arrangement == "onsite":
+        location_score = 0
+        location_summary = "Onsite work conflicts with the location constraint"
+        location_constraint_failed = True
+        extend_unique_evidence(location_evidence, required_location_evidence)
+        location_evidence.append(
+            ScoreEvidence(
+                dimension="location",
+                kind="exclusion",
+                signal="onsite at remote-or-hybrid-required location",
+                source=onsite_evidence[0].source,
+            )
+        )
+    elif required_location_evidence:
+        location_score = 40
+        location_summary = "Remote or hybrid arrangement is not confirmed"
+        location_constraint_unconfirmed = True
+        extend_unique_evidence(location_evidence, required_location_evidence)
+        location_evidence.append(
+            ScoreEvidence(
+                dimension="location",
+                kind="uncertainty",
+                signal=WORK_ARRANGEMENT_UNCONFIRMED_SIGNAL,
+                source="location",
+            )
+        )
+    else:
+        location_score = (
+            100 if location_field_match else 75 if location_evidence else 40
+        )
+        location_summary = (
+            "Preferred location appears in the location field"
+            if location_field_match
+            else "Preferred location appears only in the description"
+            if location_evidence
+            else "No preferred location evidence"
+        )
+        preferred_location_policy_confirmed = (
+            bool(required_location_evidence)
+            or is_rochester_minnesota_location(location)
+            or (bool(remote_evidence) and is_us_location(location))
+        )
+        if (
+            profile.require_preferred_location_for_strong
+            and not preferred_location_policy_confirmed
+        ):
+            preferred_location_unconfirmed = True
+            location_evidence.append(
+                ScoreEvidence(
+                    dimension="location",
+                    kind="uncertainty",
+                    signal=PREFERRED_LOCATION_UNCONFIRMED_SIGNAL,
+                    source="location",
+                )
+            )
 
     risk_evidence = matching_evidence(
         dimension="risk",
@@ -398,8 +720,15 @@ def score_job(
         dimension("risk", risk_score, weights.risk, risk_summary, risk_evidence),
     ]
     score = round(sum(item.weighted_points for item in dimensions))
-    if not role_evidence or excluded_seniority or risk_evidence:
+    if (
+        not role_evidence
+        or excluded_seniority
+        or risk_evidence
+        or location_constraint_failed
+    ):
         score = min(score, profile.thresholds.review - 1)
+    elif location_constraint_unconfirmed or preferred_location_unconfirmed:
+        score = min(score, profile.thresholds.strong - 1)
 
     evidence = [item for item in role_evidence]
     evidence.extend(seniority_evidence)
@@ -431,6 +760,7 @@ def score_job(
         evidence=evidence,
         scoring_version=SCORING_VERSION,
         review_threshold=profile.thresholds.review,
+        strong_threshold=profile.thresholds.strong,
         reasons=reasons,
         red_flags=red_flags,
     )
@@ -449,6 +779,7 @@ def scoring_fields(scored: ScoredJob) -> dict:
         ],
         "scoring_version": scored.scoring_version,
         "score_review_threshold": scored.review_threshold,
+        "score_strong_threshold": scored.strong_threshold,
         "score_reasons": scored.reasons,
         "red_flags": scored.red_flags,
     }
@@ -483,7 +814,11 @@ def rescore_stale_jobs(
             scored = score_job(posting, profile)
             notification_baselined = 0
             with storage.transaction():
-                storage.update_job_score(job["id"], scoring_fields(scored))
+                storage.update_job_score(
+                    job["id"],
+                    scoring_fields(scored),
+                    profile=profile,
+                )
                 if (
                     baseline_notification_channel is not None
                     and scored.score >= profile.thresholds.review

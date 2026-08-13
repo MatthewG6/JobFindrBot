@@ -19,6 +19,7 @@ from app.discord_notifications import (
     validate_discord_webhook_url,
 )
 from app.storage import JobStorage
+from app.scoring import SCORING_VERSION
 
 
 WEBHOOK_URL = (
@@ -62,7 +63,7 @@ def save_scored_job(
     storage: JobStorage,
     identifier: int,
     score: int,
-    scoring_version: int = 2,
+    scoring_version: int = SCORING_VERSION,
 ) -> dict:
     return storage.save_job(
         {
@@ -240,7 +241,7 @@ def test_job_payload_includes_v2_confidence_and_dimension_breakdown() -> None:
                 {"name": "location", "score": 100},
                 {"name": "risk", "score": 100},
             ],
-            "scoring_version": 2,
+            "scoring_version": SCORING_VERSION,
         }
     )
 
@@ -497,7 +498,7 @@ def test_stored_job_id_cannot_override_database_id(tmp_path: Path) -> None:
             "company": "Example",
             "url": "https://example.com/corrupt-id",
             "fit_score": 50,
-            "scoring_version": 2,
+            "scoring_version": SCORING_VERSION,
         }
     )
 

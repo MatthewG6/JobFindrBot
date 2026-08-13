@@ -208,7 +208,7 @@ def test_manual_job_saved_job_includes_score_and_hash_fields(tmp_path: Path) -> 
     assert "red_flags" in saved_job
     assert "content_hash" in saved_job
     assert 0 <= saved_job["fit_score"] <= 39
-    assert saved_job["scoring_version"] == 2
+    assert saved_job["scoring_version"] == 3
     assert saved_job["score_confidence_band"] in {"low", "medium", "high"}
     assert len(saved_job["score_dimensions"]) == 5
     assert saved_job["red_flags"]

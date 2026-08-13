@@ -13,6 +13,7 @@ from app.applications import (
 from app.candidates import (
     DEFAULT_APPLICATION_THRESHOLD,
     create_application_candidates,
+    job_qualifies_for_application,
 )
 from app.candidate_profile import default_candidate_profile
 from app.ingestion import ingest_job
@@ -288,18 +289,32 @@ def approve_application_candidate(
     application_id: int,
     storage: JobStorage = Depends(get_storage),
 ) -> dict:
-    return add_application_transition(
-        application_id,
-        ApplicationTransitionRequest(
-            status=ApplicationStatus.QUEUED,
-            message="Application approved to start",
-            current_step="Queued to begin application",
-        ),
-        storage,
-        approval_kind="start",
-        approved_by=CANDIDATE_PROFILE.approval_name,
-        expected_status=ApplicationStatus.AWAITING_START_APPROVAL,
-    )
+    with storage.transaction():
+        application = storage.get_application(application_id)
+        job = (
+            storage.get_job(application["job_id"])
+            if application is not None
+            else None
+        )
+        if application is not None and not job_qualifies_for_application(
+            job or {}
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Application job is no longer a current Strong match",
+            )
+        return add_application_transition(
+            application_id,
+            ApplicationTransitionRequest(
+                status=ApplicationStatus.QUEUED,
+                message="Application approved to start",
+                current_step="Queued to begin application",
+            ),
+            storage,
+            approval_kind="start",
+            approved_by=CANDIDATE_PROFILE.approval_name,
+            expected_status=ApplicationStatus.AWAITING_START_APPROVAL,
+        )
 
 
 @app.post("/applications/{application_id}/reject")
@@ -352,6 +367,11 @@ def create_application_candidate_records(
     threshold: int = DEFAULT_APPLICATION_THRESHOLD,
     storage: JobStorage = Depends(get_storage),
 ) -> dict:
+    if threshold < DEFAULT_APPLICATION_THRESHOLD:
+        raise HTTPException(
+            status_code=422,
+            detail="Application threshold cannot be below Strong",
+        )
     created_applications = create_application_candidates(storage, threshold)
     jobs_by_id = {job["id"]: job for job in storage.list_jobs()}
 

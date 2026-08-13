@@ -69,13 +69,31 @@ seniority, skills, location, and risk dimensions. The configured weights total
 100. Phrase-boundary matching avoids partial-word hits, aliases are deduplicated,
 and title-level seniority exclusions are evaluated in the title so ordinary
 description language does not create a disqualification. Missing role evidence,
-excluded seniority, or explicit candidate risk caps the fit score below review.
+excluded seniority, explicit candidate risk, or an onsite conflict at a
+remote-or-hybrid-required location caps the fit score below review. An
+unconfirmed work arrangement at a constrained location caps the score below
+Strong so it remains a manual-review candidate.
+
+Structured workplace type is authoritative when enrichment provides it. Text is
+a fallback with negation and technical-context filtering. Affirmative hybrid
+language may include onsite days. Arrangement-level onsite language wins over a
+Remote location label, while incidental onsite meetings, interviews, and duties
+do not. A state-aware seven-county locality catalog resolves metro cities without
+confusing explicit out-of-state namesakes. Pending application approval rechecks
+the job's current scoring version and Strong threshold inside the same database
+transaction as the transition so a historical candidate cannot outlive a
+disqualifying rescore.
+
+The private profile also requires preferred-location evidence for Strong. This
+caps out-of-region onsite namesakes and other unsupported locations below Strong,
+while retaining remote US, Rochester, and state-aware Twin Cities eligibility.
 
 Confidence is calculated independently from fit using posting completeness and
-evidence coverage. Each score stores its dimensions, matching or exclusion
-evidence, confidence band, scoring version, and the review threshold used for
-hard caps. The storage boundary recomputes the expected normalized or capped
-result before accepting any score update. Initial ingestion and successful
+evidence coverage. Each score stores its dimensions, matching, exclusion, or
+uncertainty evidence, confidence band, scoring version, and the Review and
+Strong thresholds used for caps. The storage boundary binds those values to the
+active profile and recomputes the expected normalized or capped result before
+accepting any score update. Initial ingestion and successful
 enrichment use the same scorer. After enrichment, the scheduler upgrades stale
 scores before Discord selects notifications. Schema v1 candidate profiles are
 migrated in memory; schema v1 persisted scores are structurally backfilled by

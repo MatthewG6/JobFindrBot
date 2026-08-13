@@ -16,6 +16,7 @@ class JobPosting(BaseModel):
     url: HttpUrl
     source: str
     description: str = ""
+    workplace_type: str | None = None
     source_job_id: str | None = None
     source_message_id: str | None = None
     alert_query: str | None = None
@@ -27,9 +28,16 @@ class JobPosting(BaseModel):
 
 
 ScoreDimensionName = Literal["role", "seniority", "skills", "location", "risk"]
-ScoreEvidenceKind = Literal["match", "exclusion", "risk"]
-ScoreEvidenceSource = Literal["title", "location", "description"]
+ScoreEvidenceKind = Literal["match", "exclusion", "risk", "uncertainty"]
+ScoreEvidenceSource = Literal[
+    "title",
+    "location",
+    "description",
+    "workplace_type",
+]
 ScoreConfidenceBand = Literal["low", "medium", "high"]
+WORK_ARRANGEMENT_UNCONFIRMED_SIGNAL = "remote-or-hybrid arrangement unconfirmed"
+PREFERRED_LOCATION_UNCONFIRMED_SIGNAL = "preferred location unconfirmed"
 
 
 class ScoreEvidence(BaseModel):
@@ -61,6 +69,7 @@ class ScoredJob(BaseModel):
     evidence: list[ScoreEvidence]
     scoring_version: int = Field(ge=1)
     review_threshold: int = Field(ge=1, le=99)
+    strong_threshold: int = Field(ge=2, le=100)
     reasons: list[str] = Field(default_factory=list)
     red_flags: list[str] = Field(default_factory=list)
 

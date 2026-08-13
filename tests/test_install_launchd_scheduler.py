@@ -7,6 +7,7 @@ import subprocess
 import pytest
 
 from scripts.install_launchd_scheduler import (
+    HEALTH_TIMEOUT_SECONDS,
     LAUNCHD_LABEL,
     SCAN_INTERVAL_SECONDS,
     activate_launch_agent,
@@ -37,6 +38,7 @@ def test_launchd_configuration_runs_every_thirty_minutes(
     assert configuration["Label"] == LAUNCHD_LABEL
     assert configuration["StartInterval"] == 1800
     assert SCAN_INTERVAL_SECONDS == 1800
+    assert HEALTH_TIMEOUT_SECONDS == 300
     assert configuration["RunAtLoad"] is True
     assert configuration["ProgramArguments"][0].endswith(
         "/.venv/bin/python"
