@@ -78,7 +78,7 @@ class FakeSecurityRunner:
                 return subprocess.CompletedProcess(command, 44, "", "missing")
             return subprocess.CompletedProcess(command, 0, f"{self.key}\n", "")
         if "add-generic-password" in command:
-            self.key = kwargs["input"].strip()
+            self.key = command[command.index("-w") + 1]
             return subprocess.CompletedProcess(command, 0, "", "")
         raise AssertionError(f"Unexpected command: {command}")
 
