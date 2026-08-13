@@ -14,6 +14,7 @@ from weakref import WeakSet
 
 from tinydb import Query, TinyDB
 
+from app.candidate_profile import CandidateProfile, default_candidate_profile
 from app.dedupe import job_content_hash
 from app.job_links import job_link_role, validate_manual_application_url
 from app.models import (
@@ -22,11 +23,14 @@ from app.models import (
     ApplicationStatus,
     InvalidApplicationTransition,
     JobPosting,
+    PREFERRED_LOCATION_UNCONFIRMED_SIGNAL,
     ScoreDimension,
     ScoreEvidence,
+    WORK_ARRANGEMENT_UNCONFIRMED_SIGNAL,
     utc_now,
     validate_application_transition,
 )
+from app.scoring import SCORING_VERSION, score_job, scoring_fields
 
 
 DEFAULT_DB_PATH = Path("data/jobs.json")
@@ -817,6 +821,7 @@ class JobStorage:
             "score_evidence": data.get("score_evidence") or [],
             "scoring_version": scoring_version,
             "score_review_threshold": data.get("score_review_threshold"),
+            "score_strong_threshold": data.get("score_strong_threshold"),
         }
 
     def _register_source_record(
@@ -1083,6 +1088,7 @@ class JobStorage:
             "score_evidence",
             "scoring_version",
             "score_review_threshold",
+            "score_strong_threshold",
             "score_reasons",
             "red_flags",
             "enrichment_status",
@@ -1098,26 +1104,36 @@ class JobStorage:
             raise ValueError("Job enrichment update contains invalid fields")
         scoring_keys = self._score_update_fields()
         provided_scoring_keys = set(updates) & scoring_keys
-        if provided_scoring_keys:
-            if provided_scoring_keys != scoring_keys:
-                raise ValueError(
-                    "Job enrichment update contains incomplete scoring fields"
-                )
-            self._validate_job_score_updates(updates)
         with self._access():
-            if self.jobs_table.get(doc_id=job_id) is None:
+            current_job = self.jobs_table.get(doc_id=job_id)
+            if current_job is None:
                 raise ValueError("Job does not exist")
+            if provided_scoring_keys:
+                if provided_scoring_keys != scoring_keys:
+                    raise ValueError(
+                        "Job enrichment update contains incomplete scoring fields"
+                    )
+                self._validate_job_score_updates(
+                    updates,
+                    {**current_job, **updates},
+                )
             self.jobs_table.update(dict(updates), doc_ids=[job_id])
             refreshed = self.jobs_table.get(doc_id=job_id)
             return {**refreshed, "id": refreshed.doc_id}
 
-    def update_job_score(self, job_id: int, updates: dict) -> dict:
+    def update_job_score(
+        self,
+        job_id: int,
+        updates: dict,
+        profile: CandidateProfile | None = None,
+    ) -> dict:
         if set(updates) != self._score_update_fields():
             raise ValueError("Job score update has invalid fields")
-        self._validate_job_score_updates(updates)
         with self._access():
-            if self.jobs_table.get(doc_id=job_id) is None:
+            current_job = self.jobs_table.get(doc_id=job_id)
+            if current_job is None:
                 raise ValueError("Job does not exist")
+            self._validate_job_score_updates(updates, current_job, profile)
             self.jobs_table.update(dict(updates), doc_ids=[job_id])
             refreshed = self.jobs_table.get(doc_id=job_id)
             return {**refreshed, "id": refreshed.doc_id}
@@ -1132,17 +1148,25 @@ class JobStorage:
             "score_evidence",
             "scoring_version",
             "score_review_threshold",
+            "score_strong_threshold",
             "score_reasons",
             "red_flags",
         }
 
     @staticmethod
-    def _validate_job_score_updates(updates: dict) -> None:
+    def _validate_job_score_updates(
+        updates: dict,
+        posting_data: dict,
+        profile: CandidateProfile | None = None,
+    ) -> None:
         score = updates["fit_score"]
         confidence = updates["score_confidence"]
         dimensions = updates["score_dimensions"]
         evidence = updates["score_evidence"]
         review_threshold = updates["score_review_threshold"]
+        strong_threshold = updates["score_strong_threshold"]
+        validation_profile = profile or default_candidate_profile()
+        active_thresholds = validation_profile.thresholds
         if (
             isinstance(score, bool)
             or not isinstance(score, int)
@@ -1151,10 +1175,15 @@ class JobStorage:
             or not isinstance(confidence, int)
             or not 0 <= confidence <= 100
             or updates["score_confidence_band"] not in {"low", "medium", "high"}
-            or updates["scoring_version"] != 2
+            or updates["scoring_version"] != SCORING_VERSION
             or isinstance(review_threshold, bool)
             or not isinstance(review_threshold, int)
             or not 1 <= review_threshold <= 99
+            or review_threshold != active_thresholds.review
+            or isinstance(strong_threshold, bool)
+            or not isinstance(strong_threshold, int)
+            or not review_threshold < strong_threshold <= 100
+            or strong_threshold != active_thresholds.strong
             or not isinstance(dimensions, list)
             or len(dimensions) != 5
             or not isinstance(evidence, list)
@@ -1199,9 +1228,21 @@ class JobStorage:
                 for item in validated_evidence
             )
         )
-        expected_score = (
-            min(raw_score, review_threshold - 1) if capped else raw_score
+        location_unconfirmed = any(
+            item.dimension == "location"
+            and item.kind == "uncertainty"
+            and item.signal
+            in {
+                WORK_ARRANGEMENT_UNCONFIRMED_SIGNAL,
+                PREFERRED_LOCATION_UNCONFIRMED_SIGNAL,
+            }
+            for item in validated_evidence
         )
+        expected_score = raw_score
+        if capped:
+            expected_score = min(raw_score, review_threshold - 1)
+        elif location_unconfirmed:
+            expected_score = min(raw_score, strong_threshold - 1)
         if (
             [item.name for item in validated_dimensions]
             != ["role", "seniority", "skills", "location", "risk"]
@@ -1214,6 +1255,20 @@ class JobStorage:
             )
             or updates["score_confidence_band"] != expected_confidence_band
             or score != expected_score
+        ):
+            raise ValueError("Job score update is invalid")
+        try:
+            expected_updates = scoring_fields(
+                score_job(
+                    JobPosting.model_validate(posting_data),
+                    validation_profile,
+                )
+            )
+        except ValueError as error:
+            raise ValueError("Job score update is invalid") from error
+        if any(
+            updates[field] != expected_updates[field]
+            for field in JobStorage._score_update_fields()
         ):
             raise ValueError("Job score update is invalid")
 

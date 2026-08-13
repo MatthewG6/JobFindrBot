@@ -118,6 +118,7 @@ def test_schema_six_backfills_legacy_scoring_state(tmp_path: Path) -> None:
     assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 6
     assert migrated["scoring_version"] == 1
     assert migrated["score_review_threshold"] is None
+    assert migrated["score_strong_threshold"] is None
     assert migrated["score_confidence"] is None
     assert migrated["score_confidence_band"] is None
     assert migrated["score_dimensions"] == []
@@ -147,6 +148,7 @@ def test_update_job_score_rejects_invalid_nested_contract(
         "score_evidence": [],
         "scoring_version": 2,
         "score_review_threshold": 40,
+        "score_strong_threshold": 75,
         "score_reasons": [],
         "red_flags": [],
     }
@@ -166,6 +168,7 @@ def test_enrichment_cannot_bypass_score_validation(tmp_path: Path) -> None:
         "score_evidence": [],
         "scoring_version": 2,
         "score_review_threshold": 40,
+        "score_strong_threshold": 75,
         "score_reasons": [],
         "red_flags": [],
         "enrichment_status": "enriched",
@@ -196,3 +199,112 @@ def test_score_validation_enforces_exact_review_cap(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="invalid"):
         storage.update_job_score(saved["id"], updates)
+
+
+def test_score_validation_accepts_exact_unconfirmed_location_cap(
+    tmp_path: Path,
+) -> None:
+    from app.candidate_profile import default_candidate_profile
+    from app.scoring import score_job, scoring_fields
+
+    profile = default_candidate_profile().model_copy(
+        update={
+            "preferred_location_keywords": ["minneapolis"],
+            "remote_or_hybrid_required_location_keywords": ["minneapolis"],
+        }
+    )
+    posting = JobPosting(
+        title="Junior Software Engineer",
+        company="Example Company",
+        location="Minneapolis, MN",
+        url="https://example.com/unconfirmed",
+        source="test",
+        description=(
+            "Build Java, TypeScript, and React services for a local product "
+            "team."
+        ),
+    )
+    storage = JobStorage(tmp_path / "jobs.json")
+    saved = storage.save_job(posting)
+    updates = scoring_fields(score_job(posting, profile))
+
+    assert updates["fit_score"] == profile.thresholds.strong - 1
+    assert updates["score_strong_threshold"] == profile.thresholds.strong
+    storage.update_job_score(saved["id"], updates, profile=profile)
+
+    updates["fit_score"] += 1
+    with pytest.raises(ValueError, match="invalid"):
+        storage.update_job_score(saved["id"], updates, profile=profile)
+
+
+def test_score_validation_rejects_forged_strong_threshold(tmp_path: Path) -> None:
+    from app.candidate_profile import default_candidate_profile
+    from app.scoring import score_job, scoring_fields
+
+    profile = default_candidate_profile()
+    posting = JobPosting(
+        title="Junior Software Engineer",
+        company="Example Company",
+        location="Minneapolis, MN",
+        url="https://example.com/forged-threshold",
+        source="test",
+        description="Build Java, TypeScript, and React services.",
+    )
+    storage = JobStorage(tmp_path / "jobs.json")
+    saved = storage.save_job(posting)
+    updates = scoring_fields(score_job(posting, profile))
+    updates["score_strong_threshold"] = 92
+    updates["fit_score"] = 91
+
+    with pytest.raises(ValueError, match="invalid"):
+        storage.update_job_score(saved["id"], updates)
+
+
+def test_score_validation_recomputes_required_location_uncertainty(
+    tmp_path: Path,
+) -> None:
+    from app.candidate_profile import load_candidate_profile
+    from app.scoring import score_job, scoring_fields
+
+    profile = load_candidate_profile(
+        Path("config/candidate_profile.example.yaml")
+    ).model_copy(
+        update={
+            "preferred_location_keywords": [
+                "remote",
+                "rochester",
+                "united states",
+                "usa",
+                "u.s.",
+            ],
+            "remote_or_hybrid_required_regions": [
+                "twin_cities_seven_county"
+            ],
+            "require_preferred_location_for_strong": True,
+        }
+    )
+    posting = JobPosting(
+        title="Junior Software Engineer",
+        company="Example Company",
+        location="Minneapolis, KS",
+        url="https://example.com/forged-location-evidence",
+        source="test",
+        description="Build Java, TypeScript, and React services onsite.",
+    )
+    storage = JobStorage(tmp_path / "jobs.json")
+    saved = storage.save_job(posting)
+    updates = scoring_fields(score_job(posting, profile))
+    uncertainty = "preferred location unconfirmed"
+    updates["score_evidence"] = [
+        item for item in updates["score_evidence"] if item["signal"] != uncertainty
+    ]
+    for dimension in updates["score_dimensions"]:
+        dimension["evidence"] = [
+            item for item in dimension["evidence"] if item["signal"] != uncertainty
+        ]
+    updates["fit_score"] = round(
+        sum(item["weighted_points"] for item in updates["score_dimensions"])
+    )
+
+    with pytest.raises(ValueError, match="invalid"):
+        storage.update_job_score(saved["id"], updates, profile=profile)

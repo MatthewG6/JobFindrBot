@@ -2,6 +2,7 @@ from functools import lru_cache
 import os
 from pathlib import Path
 import stat
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -102,6 +103,13 @@ class CandidateProfile(BaseModel):
     target_role_keywords: list[str] = Field(min_length=1)
     target_technology_keywords: list[str] = Field(min_length=1)
     preferred_location_keywords: list[str] = Field(min_length=1)
+    remote_or_hybrid_required_location_keywords: list[str] = Field(
+        default_factory=list
+    )
+    remote_or_hybrid_required_regions: list[
+        Literal["twin_cities_seven_county"]
+    ] = Field(default_factory=list)
+    require_preferred_location_for_strong: bool = False
     preferred_seniority_keywords: list[str] = Field(min_length=1)
     excluded_seniority_keywords: list[str] = Field(default_factory=list)
     risk_keywords: list[str] = Field(default_factory=list)
@@ -120,6 +128,7 @@ class CandidateProfile(BaseModel):
         "target_role_keywords",
         "target_technology_keywords",
         "preferred_location_keywords",
+        "remote_or_hybrid_required_location_keywords",
         "preferred_seniority_keywords",
         "excluded_seniority_keywords",
         "risk_keywords",
@@ -139,6 +148,13 @@ class CandidateProfile(BaseModel):
             raise ValueError("Unsupported candidate profile schema version")
         if self.thresholds.strong <= self.thresholds.review:
             raise ValueError("Strong threshold must be above review threshold")
+        required_locations = set(
+            self.remote_or_hybrid_required_location_keywords
+        )
+        if not required_locations.issubset(self.preferred_location_keywords):
+            raise ValueError(
+                "Remote-or-hybrid-required locations must also be preferred locations"
+            )
         return self
 
 
@@ -224,6 +240,9 @@ def migrate_legacy_candidate_profile(
         target_role_keywords=role_keywords,
         target_technology_keywords=legacy.target_technology_keywords,
         preferred_location_keywords=legacy.preferred_location_keywords,
+        remote_or_hybrid_required_location_keywords=[],
+        remote_or_hybrid_required_regions=[],
+        require_preferred_location_for_strong=False,
         preferred_seniority_keywords=list(PREFERRED_SENIORITY_SIGNALS),
         excluded_seniority_keywords=excluded,
         risk_keywords=risks,

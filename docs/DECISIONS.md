@@ -276,3 +276,33 @@ remains in this file and links to the decision that replaced it.
 - Consequence: The first 50-job validation split remains useful as transparent
   baseline evidence even when a human class is underrepresented, while future
   tuning and evaluation remain separated.
+
+## D021 - Conditional work arrangements by location
+
+- Status: accepted on 2026-08-12
+- Decision: Candidate profile schema v2 may list preferred locations that
+  require remote or hybrid work. The constraint is evaluated only when the job's
+  location field matches one of those configured locations. Confirmed remote or
+  hybrid work receives full location credit. Explicit onsite work hard-caps the
+  fit below Review. Missing arrangement evidence caps the fit below Strong so a
+  potentially suitable role can be verified manually instead of auto-promoted.
+  The latter stores structured uncertainty evidence and both thresholds so the
+  storage boundary can validate the exact cap independently.
+- Decision: Rochester remains an unconstrained preferred location. Matthew's
+  private profile applies the constraint to the state-aware
+  `twin_cities_seven_county` locality catalog, maintained from the Metropolitan
+  Council's 2025 System Statements community list.
+  Structured workplace type is authoritative; negated or technical text signals
+  and incidental onsite meetings or interviews are not treated as work
+  arrangements. Scoring metadata version 3 makes persisted version-2 jobs stale
+  so the bounded scheduler rescores them and baselines newly reviewable historical
+  jobs before Discord delivery.
+- Consequence: A strong title or technology match cannot outweigh a known
+  full-time onsite Twin Cities requirement, while incomplete postings remain
+  recoverable through review. Candidate thresholds cannot be lowered below
+  Strong. Existing application candidates are revalidated at the Pending-list
+  boundary and atomically with start approval after a score migration.
+- Decision: Matthew's private profile requires preferred-location evidence for
+  Strong. The allowed V1 location shapes are remote work, Rochester, and the
+  state-aware Twin Cities region. Explicit out-of-region namesakes and foreign
+  locations remain Review rather than becoming application candidates.

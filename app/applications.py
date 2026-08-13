@@ -1,3 +1,4 @@
+from app.candidates import job_qualifies_for_application
 from app.models import ApplicationStatus
 from app.storage import JobStorage
 
@@ -37,7 +38,12 @@ def list_application_records(
 
 
 def list_pending_application_records(storage: JobStorage) -> list[dict]:
-    return list_application_records(
-        storage,
-        status=ApplicationStatus.AWAITING_START_APPROVAL,
-    )
+    jobs_by_id = {job["id"]: job for job in storage.list_jobs()}
+    return [
+        record
+        for record in list_application_records(
+            storage,
+            status=ApplicationStatus.AWAITING_START_APPROVAL,
+        )
+        if job_qualifies_for_application(jobs_by_id.get(record["job_id"], {}))
+    ]

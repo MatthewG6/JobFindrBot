@@ -1,6 +1,9 @@
 from pathlib import Path
 
+import pytest
+
 from app.candidates import CANDIDATE_PROFILE, create_application_candidates
+from app.scoring import SCORING_VERSION
 from app.storage import JobStorage
 
 
@@ -8,7 +11,7 @@ def save_scored_job(
     storage: JobStorage,
     title: str,
     fit_score: object,
-    scoring_version: int = 2,
+    scoring_version: int = SCORING_VERSION,
 ) -> dict:
     slug = title.lower().replace(" ", "-")
     return storage.save_job(
@@ -65,13 +68,21 @@ def test_stale_high_score_does_not_create_candidate(tmp_path: Path) -> None:
     assert storage.list_applications() == []
 
 
-def test_candidate_threshold_can_be_configured(tmp_path: Path) -> None:
+def test_candidate_threshold_can_be_raised(tmp_path: Path) -> None:
     storage = JobStorage(tmp_path / "jobs.json")
-    save_scored_job(storage, "Custom Threshold Match", 70)
+    save_scored_job(storage, "Custom Threshold Match", 90)
 
-    created = create_application_candidates(storage, threshold=70)
+    created = create_application_candidates(storage, threshold=90)
 
     assert len(created) == 1
+
+
+def test_candidate_threshold_cannot_be_below_strong(tmp_path: Path) -> None:
+    storage = JobStorage(tmp_path / "jobs.json")
+    save_scored_job(storage, "Below Strong Candidate", 70)
+
+    with pytest.raises(ValueError, match="below the active Strong"):
+        create_application_candidates(storage, threshold=70)
 
 
 def test_missing_and_invalid_fit_scores_do_not_create_candidates(

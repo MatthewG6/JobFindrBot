@@ -14,6 +14,7 @@ import requests
 
 from app.candidates import qualifies_for_application
 from app.candidate_profile import default_candidate_profile
+from app.scoring import SCORING_VERSION
 from app.storage import JobStorage
 
 
@@ -188,7 +189,7 @@ def job_embed(job: dict) -> dict:
                 "name": "Fit score",
                 "value": discord_text(
                     f"{job.get('fit_score')}/100"
-                    if job.get("scoring_version") == 2
+                    if job.get("scoring_version") == SCORING_VERSION
                     else job.get("fit_score"),
                     32,
                 ),
@@ -389,7 +390,7 @@ def run_discord_notifications(
     eligible_jobs = [
         job
         for job in storage.list_jobs()
-        if job.get("scoring_version") == 2
+        if job.get("scoring_version") == SCORING_VERSION
         and qualifies_for_application(job.get("fit_score"), threshold)
     ]
     eligible_jobs.sort(

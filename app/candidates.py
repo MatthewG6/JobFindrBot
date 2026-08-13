@@ -1,6 +1,7 @@
 from math import isfinite
 
 from app.candidate_profile import default_candidate_profile
+from app.scoring import SCORING_VERSION
 from app.storage import JobStorage
 
 
@@ -14,11 +15,25 @@ def qualifies_for_application(value: object, threshold: int) -> bool:
     return isfinite(value) and value >= threshold
 
 
+def job_qualifies_for_application(
+    job: dict,
+    threshold: int = DEFAULT_APPLICATION_THRESHOLD,
+) -> bool:
+    return (
+        job.get("scoring_version") == SCORING_VERSION
+        and qualifies_for_application(job.get("fit_score"), threshold)
+    )
+
+
 def create_application_candidates(
     storage: JobStorage,
     threshold: int = DEFAULT_APPLICATION_THRESHOLD,
 ) -> list[dict]:
     """Create approval-ready application records for strong saved jobs."""
+    if threshold < DEFAULT_APPLICATION_THRESHOLD:
+        raise ValueError(
+            "Application threshold cannot be below the active Strong threshold"
+        )
     jobs = storage.list_jobs()
     existing_job_ids = {
         application["job_id"]
@@ -28,10 +43,7 @@ def create_application_candidates(
 
     for job in jobs:
         fit_score = job.get("fit_score", 0)
-        if job.get("scoring_version") != 2 or not qualifies_for_application(
-            fit_score,
-            threshold,
-        ):
+        if not job_qualifies_for_application(job, threshold):
             continue
 
         if job["id"] in existing_job_ids:

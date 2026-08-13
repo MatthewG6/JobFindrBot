@@ -33,7 +33,7 @@ def populate_jobs(storage: JobStorage) -> None:
         for offset in range(count):
             if predicted == "strong":
                 title = "Junior Software Engineer"
-                location = "Remote"
+                location = "Remote - United States"
                 description = "Build React TypeScript cloud applications. " * 15
             elif predicted == "review":
                 title = "Software Engineer"

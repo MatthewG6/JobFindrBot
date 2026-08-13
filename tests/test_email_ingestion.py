@@ -570,7 +570,7 @@ def test_email_ingestion_scores_dedupes_and_marks_message_processed(
     assert second_result["already_processed"] is True
     assert len(storage.list_jobs()) == 2
     assert all("fit_score" in job for job in storage.list_jobs())
-    assert all(job["scoring_version"] == 2 for job in storage.list_jobs())
+    assert all(job["scoring_version"] == 3 for job in storage.list_jobs())
     assert all(
         len(job["score_dimensions"]) == 5 for job in storage.list_jobs()
     )
