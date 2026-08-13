@@ -136,6 +136,10 @@ remains in this file and links to the decision that replaced it.
 
 - Status: accepted on 2026-08-04; blocking D008-D010 implementation until its
   prerequisites pass
+- Implemented on 2026-08-13 with AES-256-GCM authenticated encryption, a macOS
+  Keychain owner key, explicit owner-only recovery export and verification,
+  schema-v7 encrypted records, fail-closed retention/reuse policies, redacted
+  application events, application-scoped deletion, and full snapshot purge.
 - Decision: Reusable application-profile and answer values must be encrypted at
   rest with a key held outside the data store, preferably macOS Keychain.
   Demographic, disability, veteran, background, signature, and legal-attestation

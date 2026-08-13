@@ -115,7 +115,7 @@ def test_schema_six_backfills_legacy_scoring_state(tmp_path: Path) -> None:
     storage = JobStorage(database_path)
     migrated = storage.list_jobs()[0]
 
-    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 6
+    assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 7
     assert migrated["scoring_version"] == 1
     assert migrated["score_review_threshold"] is None
     assert migrated["score_strong_threshold"] is None

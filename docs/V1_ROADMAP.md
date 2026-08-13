@@ -5,7 +5,8 @@ resolves them to official employer postings where possible, produces evidence-
 based fit scores, supports human review, and assists with applications without
 submitting anything without explicit approval.
 
-Current checklist completion after Scoring V2: **22 of 44 items (50%)**.
+Current checklist completion after the sensitive-data foundation:
+**25 of 44 items (57%)**.
 
 ## Definition of Done
 
@@ -35,20 +36,20 @@ Current checklist completion after Scoring V2: **22 of 44 items (50%)**.
 - [x] Provide calibration and validation benchmark tooling
 - [x] Replace keyword accumulation with normalized Scoring V2 dimensions
 - [x] Store fit score, confidence score, evidence, and scoring version
-- [ ] Label at least 50 real jobs, including a held-out validation set
+- [x] Label at least 50 real jobs, including a held-out validation set
 - [ ] Demonstrate at least 60% validation accuracy before making that claim
 - [ ] Target at least 70% precision for jobs sent to the review inbox
 
 ### Review and application assistance
 
 - [x] Application state machine with separate start and submit approvals
-- [ ] Implement the sensitive-data encryption, retention, deletion, and redaction policy
+- [x] Implement the sensitive-data encryption, retention, deletion, and redaction policy
 - [ ] Add a validated private application profile separate from scoring preferences
 - [ ] Catalog resume variants and other approved application documents
 - [ ] Store structured answers with sensitivity, context, provenance, and revisions
 - [ ] Support automatic, confirm-first, and never-reuse answer policies
 - [ ] Match questions by meaning and context with explicit confidence
-- [ ] Add a focused local review and labeling dashboard
+- [x] Add a focused local review and labeling dashboard
 - [ ] Let users view, edit, retire, and delete stored answers
 - [ ] Review unknown questions through Discord and route sensitive input locally
 - [ ] Support approved Playwright assistance on selected employer ATS platforms
@@ -70,15 +71,15 @@ Current checklist completion after Scoring V2: **22 of 44 items (50%)**.
 
 ## Ordered Backlog
 
-1. Build the labeling workflow and held-out scoring benchmark
-2. Add the focused local review and labeling dashboard
-3. Implement D015, including key recovery, backup purge, and its sensitive-data
-   restore drill
-4. Add the private application profile and approved document catalog
-5. Add structured answer memory, Discord non-sensitive question approvals, and
+1. [x] Build the labeling workflow and held-out scoring benchmark
+2. [x] Add the focused local review and labeling dashboard
+3. [x] Implement D015, including key recovery, backup purge, and its
+   sensitive-data restore drill
+4. [ ] Add the private application profile and approved document catalog
+5. [ ] Add structured answer memory, Discord non-sensitive question approvals, and
    owner-only local sensitive input
-6. Add approved ATS form-assistance adapters and final review package
-7. Rehearse restore, complete release QA, and publish V1 documentation
+6. [ ] Add approved ATS form-assistance adapters and final review package
+7. [ ] Rehearse restore, complete release QA, and publish V1 documentation
 
 ## Later Versions
 

@@ -34,6 +34,7 @@ def test_release_foundation_files_are_checked_in() -> None:
         Path("config/candidate_profile.example.yaml"),
         Path("config/dynamic_render_allowlist.json"),
         Path("docs/ARCHITECTURE.md"),
+        Path("docs/SENSITIVE_DATA_OPERATIONS.md"),
         Path("docs/V1_ROADMAP.md"),
     ]
 

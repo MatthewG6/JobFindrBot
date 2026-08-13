@@ -158,6 +158,11 @@ Schema v5 adds separate dynamic-resolution attempts and cooldowns.
 Schema v6 adds scoring version, confidence, dimensions, and evidence. The
 migration does not reinterpret legacy fit values; the scheduler's scoring stage
 performs that separate deterministic upgrade before notifications.
+Schema v7 adds the validated encrypted-sensitive-value table. AES-256-GCM binds
+each ciphertext to its record, scope, and field; the key remains outside TinyDB
+and its backups in macOS Keychain. Sensitive audit events persist redacted
+metadata only. Deletion can purge every retained full-database snapshot because
+selective removal from old snapshots would weaken backup integrity.
 
 Backup SHA-256 sidecars detect accidental corruption. They are not authenticated
 and do not defend against a malicious local user who can rewrite both files; V1's
