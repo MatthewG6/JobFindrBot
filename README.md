@@ -90,12 +90,16 @@ Greenhouse and Lever APIs, static employer-page `JobPosting` JSON-LD, or an
 approved read-only dynamic fallback before they are rescored. Application
 records require separate approval to start and submit.
 
-Scoring V2 now produces normalized role, seniority, skills, location, and risk
+Scoring metadata V3 produces normalized role, seniority, skills, location, and risk
 dimensions with independent confidence and structured evidence. A loopback-only
 review surface creates a fixed 25-job calibration set followed by 50 held-out
-validation jobs and stores private immutable labels. Completing those real-job
-labels, the broader review dashboard, and approved ATS assistance remain V1 work
-in progress. See the
+validation jobs and stores private immutable labels. The first 75-job review is
+complete and displays diagnostic results, but it does not support an official
+accuracy claim because the human validation labels contain no Strong examples.
+The application security foundation now encrypts retained sensitive values with
+a Keychain-held key and supports recovery verification, redacted audit events,
+deletion, and backup purge. The private application profile, answer memory, and
+approved ATS assistance remain V1 work. See the
 [V1 definition of done](docs/V1_ROADMAP.md) and
 [architecture](docs/ARCHITECTURE.md). Product, architecture, safety, and
 sequencing choices are retained in the
@@ -436,6 +440,10 @@ Schema v4 stores bounded provider-resolution attempts, cooldowns, and sanitized
 outcome types.
 Schema v5 stores separate dynamic-resolution attempts and cooldowns.
 Schema v6 adds the Scoring V2 version, confidence, dimensions, and evidence.
+Schema v7 adds authenticated encrypted-sensitive-value records; the owner key is
+held outside the database in macOS Keychain. Recovery and deletion procedures
+are documented in
+[`docs/SENSITIVE_DATA_OPERATIONS.md`](docs/SENSITIVE_DATA_OPERATIONS.md).
 
 ## Candidate Profile and Scoring Benchmark
 
@@ -649,6 +657,7 @@ app/
   models.py
   operational_metrics.py
   scoring_benchmark.py
+  sensitive_data.py
   storage.py
   scoring.py
   dedupe.py
@@ -662,6 +671,7 @@ docs/
   ARCHITECTURE.md
   DECISIONS.md
   PRODUCT_REQUIREMENTS.md
+  SENSITIVE_DATA_OPERATIONS.md
   V1_ROADMAP.md
 data/
   .gitkeep
@@ -670,6 +680,7 @@ scripts/
   run_dynamic_rendering.py
   run_employer_resolution.py
   run_job_enrichment.py
+  manage_sensitive_data.py
   run_scheduled_scan.py
   run_scoring_benchmark.py
 tests/

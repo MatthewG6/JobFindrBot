@@ -6,6 +6,7 @@ pyyaml
 requests
 urllib3
 certifi
+cryptography>=45,<51
 beautifulsoup4
 google-api-python-client
 google-auth-httplib2

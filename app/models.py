@@ -4,6 +4,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, StringConstraints
 
+from app.sensitive_data import REDACTED_VALUE, SensitiveCategory
+
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
@@ -225,6 +227,10 @@ class ApplicationEvent(BaseModel):
     provider: str | None = None
     approval_kind: str | None = None
     approved_by: str | None = None
+    sensitive_question: str | None = None
+    sensitive_category: SensitiveCategory | None = None
+    approval_outcome: Literal["pending", "approved", "declined"] | None = None
+    value_redacted: Literal[REDACTED_VALUE] | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 

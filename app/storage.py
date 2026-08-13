@@ -10,9 +10,11 @@ from threading import Lock, RLock, local
 from types import TracebackType
 from typing import Iterator
 import tempfile
+from uuid import uuid4
 from weakref import WeakSet
 
 from tinydb import Query, TinyDB
+from pydantic import ValidationError
 
 from app.candidate_profile import CandidateProfile, default_candidate_profile
 from app.dedupe import job_content_hash
@@ -31,10 +33,20 @@ from app.models import (
     validate_application_transition,
 )
 from app.scoring import SCORING_VERSION, score_job, scoring_fields
+from app.sensitive_data import (
+    NO_RETENTION_BY_DEFAULT,
+    REDACTED_VALUE,
+    SensitiveCategory,
+    SensitiveReadPurpose,
+    SensitiveReusePolicy,
+    SensitiveValueCipher,
+    SensitiveValueRecord,
+    encryption_context,
+)
 
 
 DEFAULT_DB_PATH = Path("data/jobs.json")
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 MIN_ENRICHED_DESCRIPTION_CHARS = 20
 DEFAULT_BACKUP_RETENTION = 14
 _DATABASE_LOCKS: dict[Path, "DatabaseLock"] = {}
@@ -127,7 +139,12 @@ def database_lock(db_path: Path) -> DatabaseLock:
 
 
 class JobStorage:
-    def __init__(self, db_path: Path = DEFAULT_DB_PATH) -> None:
+    def __init__(
+        self,
+        db_path: Path = DEFAULT_DB_PATH,
+        *,
+        sensitive_cipher: SensitiveValueCipher | None = None,
+    ) -> None:
         if db_path.parent.is_symlink():
             raise ValueError("Database directory must be a regular directory")
         directory_existed = db_path.parent.exists()
@@ -140,6 +157,7 @@ class JobStorage:
         if db_path.is_symlink():
             raise ValueError("Database must be a regular file")
         self._db_path = db_path
+        self._sensitive_cipher = sensitive_cipher
         self._lock = database_lock(db_path)
         with self._lock:
             if self._lock.transaction_owner is not None:
@@ -183,6 +201,7 @@ class JobStorage:
         self.job_links_table = self.db.table("job_links")
         self.job_source_records_table = self.db.table("job_source_records")
         self.schema_metadata_table = self.db.table("schema_metadata")
+        self.sensitive_values_table = self.db.table("sensitive_values")
 
     def _ensure_schema(self) -> None:
         metadata = Query()
@@ -201,6 +220,7 @@ class JobStorage:
             raise ValueError("Database schema is newer than this Jobbot build")
 
         if version < CURRENT_SCHEMA_VERSION:
+            self._validate_sensitive_records()
             self._write_backup(
                 kind=f"migration-v{version + 1}",
                 now=utc_now(),
@@ -307,6 +327,14 @@ class JobStorage:
             or version != CURRENT_SCHEMA_VERSION
         ):
             raise ValueError("Database schema version is unsupported")
+        self._validate_sensitive_records()
+
+    def _validate_sensitive_records(self) -> None:
+        try:
+            for record in self.sensitive_values_table.all():
+                SensitiveValueRecord.model_validate(dict(record))
+        except ValidationError:
+            raise ValueError("Sensitive-value table is invalid") from None
 
     def _apply_migration(self, version: int) -> None:
         if version == 1:
@@ -411,6 +439,8 @@ class JobStorage:
                     self._scoring_defaults(dict(job)),
                     doc_ids=[job.doc_id],
                 )
+            return
+        if version == 7:
             return
         raise ValueError(f"Unsupported database migration: {version}")
 
@@ -575,6 +605,207 @@ class JobStorage:
                     checksum_path.unlink()
                 removed += 1
         return removed
+
+    def purge_database_backups(self, *, confirm: bool = False) -> int:
+        """Delete retained snapshots after sensitive data is removed."""
+        if not confirm:
+            raise ValueError("Backup purge requires explicit confirmation")
+        with self._access():
+            return self._purge_database_backups()
+
+    def _purge_database_backups(self) -> int:
+        backup_directory = self._backup_directory()
+        if not backup_directory.exists():
+            return 0
+        if backup_directory.is_symlink() or not backup_directory.is_dir():
+            raise ValueError("Backup directory must be a regular directory")
+        backup_name = re.escape(self._db_path.stem)
+        managed_backup = re.compile(
+            rf"^{backup_name}-(?:daily-\d{{4}}-\d{{2}}-\d{{2}}|"
+            rf"migration-v\d+-\d{{8}}T\d{{12}}Z)\.json$"
+        )
+        managed_paths: list[Path] = []
+        for path in tuple(backup_directory.iterdir()):
+            backup_filename = path.name.removesuffix(".sha256")
+            if managed_backup.fullmatch(backup_filename) is None:
+                continue
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("Backup entry must be a regular file")
+            managed_paths.append(path)
+        backup_count = sum(
+            path.name.endswith(".json") for path in managed_paths
+        )
+        for path in managed_paths:
+            path.unlink()
+        self._fsync_path_best_effort(backup_directory)
+        return backup_count
+
+    @staticmethod
+    def _fsync_path_best_effort(path: Path) -> None:
+        try:
+            descriptor = os.open(path, os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            try:
+                os.fsync(descriptor)
+            except OSError:
+                pass
+        finally:
+            os.close(descriptor)
+
+    def save_sensitive_value(
+        self,
+        *,
+        scope: str,
+        field_name: str,
+        value: str,
+        category: SensitiveCategory | str,
+        reuse_policy: SensitiveReusePolicy | str,
+        approved_by: str,
+        scope_id: str | None = None,
+        retention_confirmed: bool = False,
+    ) -> dict:
+        cipher = self._require_sensitive_cipher()
+        parsed_category = SensitiveCategory(category)
+        parsed_policy = SensitiveReusePolicy(reuse_policy)
+        if (
+            parsed_category in NO_RETENTION_BY_DEFAULT
+            and not retention_confirmed
+        ):
+            raise ValueError(
+                f"{parsed_category.value} values require explicit retention "
+                "confirmation"
+            )
+        secret_id = uuid4().hex
+        now = utc_now()
+        context = encryption_context(
+            secret_id=secret_id,
+            scope=scope,
+            scope_id=scope_id,
+            field_name=field_name,
+        )
+        envelope = cipher.encrypt(value, context=context)
+        record = SensitiveValueRecord(
+            secret_id=secret_id,
+            scope=scope,
+            scope_id=scope_id,
+            field_name=field_name,
+            category=parsed_category,
+            reuse_policy=parsed_policy,
+            retention_confirmed=retention_confirmed,
+            approved_by=approved_by,
+            encrypted_value=envelope,
+            created_at=now,
+            updated_at=now,
+        )
+        with self._access():
+            if scope == "application":
+                if (
+                    scope_id is None
+                    or not scope_id.isdecimal()
+                    or str(int(scope_id)) != scope_id
+                    or not self.applications_table.contains(
+                        doc_id=int(scope_id)
+                    )
+                ):
+                    raise ValueError(
+                        "Application-scoped sensitive value requires an "
+                        "existing application"
+                    )
+            self.sensitive_values_table.insert(record.model_dump(mode="json"))
+        return self._sensitive_metadata(record.model_dump(mode="json"))
+
+    def list_sensitive_values(
+        self,
+        *,
+        scope: str | None = None,
+        scope_id: str | None = None,
+    ) -> list[dict]:
+        with self._access():
+            records = self.sensitive_values_table.all()
+            return [
+                self._sensitive_metadata(dict(record))
+                for record in records
+                if (scope is None or record.get("scope") == scope)
+                and (scope_id is None or record.get("scope_id") == scope_id)
+            ]
+
+    def read_sensitive_value(
+        self,
+        secret_id: str,
+        *,
+        purpose: SensitiveReadPurpose | str,
+        reuse_approved_by: str | None = None,
+    ) -> str:
+        cipher = self._require_sensitive_cipher()
+        parsed_purpose = SensitiveReadPurpose(purpose)
+        with self._access():
+            query = Query()
+            record = self.sensitive_values_table.get(
+                query.secret_id == secret_id
+            )
+            if record is None:
+                raise ValueError("Sensitive value does not exist")
+            parsed = SensitiveValueRecord.model_validate(dict(record))
+            if parsed_purpose is SensitiveReadPurpose.APPLICATION_REUSE:
+                if parsed.reuse_policy is SensitiveReusePolicy.NEVER_REUSE:
+                    raise ValueError(
+                        "Sensitive value policy forbids application reuse"
+                    )
+                if not reuse_approved_by:
+                    raise ValueError(
+                        "Sensitive value reuse requires explicit approval"
+                    )
+            context = encryption_context(
+                secret_id=parsed.secret_id,
+                scope=parsed.scope,
+                scope_id=parsed.scope_id,
+                field_name=parsed.field_name,
+            )
+            return cipher.decrypt(parsed.encrypted_value, context=context)
+
+    def delete_sensitive_value(
+        self,
+        secret_id: str,
+        *,
+        purge_backups: bool = False,
+    ) -> dict:
+        with self._access():
+            backups_purged = (
+                self._purge_database_backups() if purge_backups else 0
+            )
+            query = Query()
+            record = self.sensitive_values_table.get(
+                query.secret_id == secret_id
+            )
+            if record is None:
+                return {
+                    "deleted": False,
+                    "backups_purged": backups_purged,
+                    "backup_purge_recommended": not purge_backups,
+                }
+            self.sensitive_values_table.remove(doc_ids=[record.doc_id])
+            return {
+                "deleted": True,
+                "backups_purged": backups_purged,
+                "backup_purge_recommended": not purge_backups,
+            }
+
+    def _require_sensitive_cipher(self) -> SensitiveValueCipher:
+        if self._sensitive_cipher is None:
+            raise RuntimeError(
+                "Sensitive-data encryption is not configured for this storage"
+            )
+        return self._sensitive_cipher
+
+    @staticmethod
+    def _sensitive_metadata(record: dict) -> dict:
+        return {
+            key: value
+            for key, value in record.items()
+            if key != "encrypted_value"
+        }
 
     def _reload(self) -> None:
         self.db.close()
@@ -1838,6 +2069,90 @@ class JobStorage:
             if updated_application is None:
                 raise RuntimeError("Application disappeared after update")
             return updated_application
+
+    def add_sensitive_application_event(
+        self,
+        application_id: int,
+        *,
+        question: str,
+        category: SensitiveCategory | str,
+        approval_outcome: str = "pending",
+        approved_by: str | None = None,
+        status: ApplicationStatus | str | None = None,
+    ) -> dict:
+        parsed_category = SensitiveCategory(category)
+        if approval_outcome not in {"pending", "approved", "declined"}:
+            raise ValueError("Sensitive approval outcome is invalid")
+        if approval_outcome == "approved" and not approved_by:
+            raise ValueError("Approved sensitive input requires an approver")
+        current_step = "Sensitive input required locally"
+        with self._access():
+            application = self.get_application(application_id)
+            if application is None:
+                raise ValueError(f"Application {application_id} does not exist")
+            current_status = ApplicationStatus(application["status"])
+            next_status = ApplicationStatus(status or current_status)
+            if status is not None:
+                validate_application_transition(current_status, next_status)
+            event = ApplicationEvent(
+                status=next_status,
+                message=f"Sensitive input {approval_outcome}",
+                current_step=current_step,
+                provider=application.get("provider"),
+                approved_by=approved_by,
+                sensitive_question=question,
+                sensitive_category=parsed_category,
+                approval_outcome=approval_outcome,
+                value_redacted=REDACTED_VALUE,
+            )
+            events = [*application["events"], event.model_dump(mode="json")]
+            self.applications_table.update(
+                {
+                    "status": next_status.value,
+                    "current_step": current_step,
+                    "events": events,
+                    "updated_at": utc_now().isoformat(),
+                },
+                doc_ids=[application_id],
+            )
+            updated = self.get_application(application_id)
+            if updated is None:
+                raise RuntimeError("Application disappeared after update")
+            return updated
+
+    def delete_application(
+        self,
+        application_id: int,
+        *,
+        purge_backups: bool = False,
+    ) -> dict:
+        with self._access():
+            backups_purged = (
+                self._purge_database_backups() if purge_backups else 0
+            )
+            application = self.applications_table.get(doc_id=application_id)
+            if application is None:
+                return {
+                    "deleted": False,
+                    "sensitive_values_deleted": 0,
+                    "backups_purged": backups_purged,
+                    "backup_purge_recommended": not purge_backups,
+                }
+            query = Query()
+            sensitive_records = self.sensitive_values_table.search(
+                (query.scope == "application")
+                & (query.scope_id == str(application_id))
+            )
+            self.sensitive_values_table.remove(
+                doc_ids=[record.doc_id for record in sensitive_records]
+            )
+            self.applications_table.remove(doc_ids=[application_id])
+            return {
+                "deleted": True,
+                "sensitive_values_deleted": len(sensitive_records),
+                "backups_purged": backups_purged,
+                "backup_purge_recommended": not purge_backups,
+            }
 
 
 def save_job(job_data: dict) -> dict:
