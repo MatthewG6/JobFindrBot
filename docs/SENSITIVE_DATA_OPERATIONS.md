@@ -35,10 +35,15 @@ printing plaintext.
 To restore the key after replacing or repairing the Mac:
 
 ```bash
-.venv/bin/python scripts/manage_sensitive_data.py restore-recovery /secure/offline/jobbot-recovery.json
+.venv/bin/python scripts/manage_sensitive_data.py restore-recovery \
+  /secure/offline/jobbot-recovery.json data/jobs.json \
+  --confirm REPLACE-JOBBOT-KEY
 ```
 
-Run `verify-recovery` against the restored database before restarting Jobbot.
+The restore command authenticates every encrypted record in the target database
+before replacing a different live key. The Keychain API refuses a different
+recovery key unless replacement is explicit. Run `verify-recovery` against the
+restored database again before restarting Jobbot.
 
 ## Retention and Deletion
 

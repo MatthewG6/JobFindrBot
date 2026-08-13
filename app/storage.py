@@ -37,6 +37,7 @@ from app.sensitive_data import (
     NO_RETENTION_BY_DEFAULT,
     REDACTED_VALUE,
     SensitiveCategory,
+    SensitiveReadPurpose,
     SensitiveReusePolicy,
     SensitiveValueCipher,
     SensitiveValueRecord,
@@ -219,6 +220,7 @@ class JobStorage:
             raise ValueError("Database schema is newer than this Jobbot build")
 
         if version < CURRENT_SCHEMA_VERSION:
+            self._validate_sensitive_records()
             self._write_backup(
                 kind=f"migration-v{version + 1}",
                 now=utc_now(),
@@ -325,6 +327,9 @@ class JobStorage:
             or version != CURRENT_SCHEMA_VERSION
         ):
             raise ValueError("Database schema version is unsupported")
+        self._validate_sensitive_records()
+
+    def _validate_sensitive_records(self) -> None:
         try:
             for record in self.sensitive_values_table.all():
                 SensitiveValueRecord.model_validate(dict(record))
@@ -614,18 +619,23 @@ class JobStorage:
             return 0
         if backup_directory.is_symlink() or not backup_directory.is_dir():
             raise ValueError("Backup directory must be a regular directory")
-        prefix = f"{self._db_path.stem}-"
-        backup_count = 0
+        backup_name = re.escape(self._db_path.stem)
+        managed_backup = re.compile(
+            rf"^{backup_name}-(?:daily-\d{{4}}-\d{{2}}-\d{{2}}|"
+            rf"migration-v\d+-\d{{8}}T\d{{12}}Z)\.json$"
+        )
+        managed_paths: list[Path] = []
         for path in tuple(backup_directory.iterdir()):
-            if not path.name.startswith(prefix) or not (
-                path.name.endswith(".json")
-                or path.name.endswith(".json.sha256")
-            ):
+            backup_filename = path.name.removesuffix(".sha256")
+            if managed_backup.fullmatch(backup_filename) is None:
                 continue
             if path.is_symlink() or not path.is_file():
                 raise ValueError("Backup entry must be a regular file")
-            if path.name.endswith(".json"):
-                backup_count += 1
+            managed_paths.append(path)
+        backup_count = sum(
+            path.name.endswith(".json") for path in managed_paths
+        )
+        for path in managed_paths:
             path.unlink()
         self._fsync_path_best_effort(backup_directory)
         return backup_count
@@ -690,6 +700,19 @@ class JobStorage:
             updated_at=now,
         )
         with self._access():
+            if scope == "application":
+                if (
+                    scope_id is None
+                    or not scope_id.isdecimal()
+                    or str(int(scope_id)) != scope_id
+                    or not self.applications_table.contains(
+                        doc_id=int(scope_id)
+                    )
+                ):
+                    raise ValueError(
+                        "Application-scoped sensitive value requires an "
+                        "existing application"
+                    )
             self.sensitive_values_table.insert(record.model_dump(mode="json"))
         return self._sensitive_metadata(record.model_dump(mode="json"))
 
@@ -708,8 +731,15 @@ class JobStorage:
                 and (scope_id is None or record.get("scope_id") == scope_id)
             ]
 
-    def read_sensitive_value(self, secret_id: str) -> str:
+    def read_sensitive_value(
+        self,
+        secret_id: str,
+        *,
+        purpose: SensitiveReadPurpose | str,
+        reuse_approved_by: str | None = None,
+    ) -> str:
         cipher = self._require_sensitive_cipher()
+        parsed_purpose = SensitiveReadPurpose(purpose)
         with self._access():
             query = Query()
             record = self.sensitive_values_table.get(
@@ -718,6 +748,15 @@ class JobStorage:
             if record is None:
                 raise ValueError("Sensitive value does not exist")
             parsed = SensitiveValueRecord.model_validate(dict(record))
+            if parsed_purpose is SensitiveReadPurpose.APPLICATION_REUSE:
+                if parsed.reuse_policy is SensitiveReusePolicy.NEVER_REUSE:
+                    raise ValueError(
+                        "Sensitive value policy forbids application reuse"
+                    )
+                if not reuse_approved_by:
+                    raise ValueError(
+                        "Sensitive value reuse requires explicit approval"
+                    )
             context = encryption_context(
                 secret_id=parsed.secret_id,
                 scope=parsed.scope,
@@ -733,6 +772,9 @@ class JobStorage:
         purge_backups: bool = False,
     ) -> dict:
         with self._access():
+            backups_purged = (
+                self._purge_database_backups() if purge_backups else 0
+            )
             query = Query()
             record = self.sensitive_values_table.get(
                 query.secret_id == secret_id
@@ -740,13 +782,10 @@ class JobStorage:
             if record is None:
                 return {
                     "deleted": False,
-                    "backups_purged": 0,
-                    "backup_purge_recommended": False,
+                    "backups_purged": backups_purged,
+                    "backup_purge_recommended": not purge_backups,
                 }
             self.sensitive_values_table.remove(doc_ids=[record.doc_id])
-            backups_purged = (
-                self._purge_database_backups() if purge_backups else 0
-            )
             return {
                 "deleted": True,
                 "backups_purged": backups_purged,
@@ -2040,13 +2079,13 @@ class JobStorage:
         approval_outcome: str = "pending",
         approved_by: str | None = None,
         status: ApplicationStatus | str | None = None,
-        current_step: str = "Sensitive input required locally",
     ) -> dict:
         parsed_category = SensitiveCategory(category)
         if approval_outcome not in {"pending", "approved", "declined"}:
             raise ValueError("Sensitive approval outcome is invalid")
         if approval_outcome == "approved" and not approved_by:
             raise ValueError("Approved sensitive input requires an approver")
+        current_step = "Sensitive input required locally"
         with self._access():
             application = self.get_application(application_id)
             if application is None:
@@ -2088,13 +2127,16 @@ class JobStorage:
         purge_backups: bool = False,
     ) -> dict:
         with self._access():
+            backups_purged = (
+                self._purge_database_backups() if purge_backups else 0
+            )
             application = self.applications_table.get(doc_id=application_id)
             if application is None:
                 return {
                     "deleted": False,
                     "sensitive_values_deleted": 0,
-                    "backups_purged": 0,
-                    "backup_purge_recommended": False,
+                    "backups_purged": backups_purged,
+                    "backup_purge_recommended": not purge_backups,
                 }
             query = Query()
             sensitive_records = self.sensitive_values_table.search(
@@ -2105,9 +2147,6 @@ class JobStorage:
                 doc_ids=[record.doc_id for record in sensitive_records]
             )
             self.applications_table.remove(doc_ids=[application_id])
-            backups_purged = (
-                self._purge_database_backups() if purge_backups else 0
-            )
             return {
                 "deleted": True,
                 "sensitive_values_deleted": len(sensitive_records),

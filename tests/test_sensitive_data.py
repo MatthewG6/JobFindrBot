@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 import pytest
+from tinydb import TinyDB
 
 from app.models import ApplicationStatus, JobPosting
 from app.sensitive_data import (
@@ -15,6 +16,7 @@ from app.sensitive_data import (
     REDACTED_VALUE,
     SensitiveCategory,
     SensitiveDataError,
+    SensitiveReadPurpose,
     SensitiveReusePolicy,
     SensitiveValueCipher,
     encryption_context,
@@ -51,6 +53,11 @@ def test_authenticated_encryption_round_trip_and_tamper_detection() -> None:
         cipher.decrypt(tampered, context=context())
     with pytest.raises(SensitiveDataError, match="authenticated"):
         cipher.decrypt(envelope, context=context("phone"))
+    malformed_base64 = envelope.model_copy(
+        update={"ciphertext": f"{envelope.ciphertext}!!!!"}
+    )
+    with pytest.raises(SensitiveDataError, match="authenticated"):
+        cipher.decrypt(malformed_base64, context=context())
 
 
 def test_wrong_key_is_rejected_without_disclosing_plaintext() -> None:
@@ -150,12 +157,44 @@ def test_recovery_rejects_world_readable_and_tampered_packages(
     recovery_path.chmod(0o644)
     with pytest.raises(SensitiveDataError, match="owner-only"):
         store.load_recovery_key(recovery_path)
+
+
+def test_recovery_does_not_replace_different_existing_key_without_consent(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runner = FakeSecurityRunner()
+    runner.key = base64.urlsafe_b64encode(TEST_KEY).decode("ascii")
+    monkeypatch.setattr("app.sensitive_data.platform.system", lambda: "Darwin")
+    store = MacOSKeychainStore(runner=runner)
+    recovery_path = tmp_path / "recovery.json"
+    store.export_recovery(recovery_path)
+    other_key = bytes(reversed(TEST_KEY))
+    runner.key = base64.urlsafe_b64encode(other_key).decode("ascii")
+
+    with pytest.raises(SensitiveDataError, match="differs"):
+        store.restore_recovery(recovery_path)
+    assert runner.key == base64.urlsafe_b64encode(other_key).decode("ascii")
+
+    restored = store.restore_recovery(
+        recovery_path,
+        replace_existing=True,
+    )
+    assert restored == SensitiveValueCipher(TEST_KEY).key_id
+    assert store.load_key() == TEST_KEY
     recovery_path.chmod(0o600)
     payload = json.loads(recovery_path.read_text(encoding="utf-8"))
     payload["key_id"] = "0" * 16
     recovery_path.write_text(json.dumps(payload), encoding="utf-8")
     recovery_path.chmod(0o600)
     with pytest.raises(SensitiveDataError, match="checksum"):
+        store.load_recovery_key(recovery_path)
+
+    payload["key_id"] = SensitiveValueCipher(TEST_KEY).key_id
+    payload["key"] = f"{payload['key']}!!!!"
+    recovery_path.write_text(json.dumps(payload), encoding="utf-8")
+    recovery_path.chmod(0o600)
+    with pytest.raises(SensitiveDataError, match="key is invalid"):
         store.load_recovery_key(recovery_path)
 
 
@@ -187,7 +226,10 @@ def test_storage_persists_ciphertext_and_returns_metadata_only(
     assert "private@example.com" not in raw_database
     assert "encrypted_value" not in saved
     assert storage.list_sensitive_values() == [saved]
-    assert storage.read_sensitive_value(saved["secret_id"]) == (
+    assert storage.read_sensitive_value(
+        saved["secret_id"],
+        purpose=SensitiveReadPurpose.OWNER_REVIEW,
+    ) == (
         "private@example.com"
     )
     assert storage.schema_version() == CURRENT_SCHEMA_VERSION == 7
@@ -246,6 +288,41 @@ def test_sensitive_values_cannot_use_automatic_reuse(tmp_path: Path) -> None:
         )
 
 
+def test_sensitive_read_enforces_reuse_policy_and_approval(tmp_path: Path) -> None:
+    storage = make_storage(tmp_path)
+    confirm_first = save_contact(storage)
+    never_reuse = storage.save_sensitive_value(
+        scope="answer_bank",
+        field_name="background_response",
+        value="private response",
+        category=SensitiveCategory.BACKGROUND,
+        reuse_policy=SensitiveReusePolicy.NEVER_REUSE,
+        approved_by="Matthew",
+        retention_confirmed=True,
+    )
+
+    with pytest.raises(ValueError, match="explicit approval"):
+        storage.read_sensitive_value(
+            confirm_first["secret_id"],
+            purpose=SensitiveReadPurpose.APPLICATION_REUSE,
+        )
+    assert storage.read_sensitive_value(
+        confirm_first["secret_id"],
+        purpose=SensitiveReadPurpose.APPLICATION_REUSE,
+        reuse_approved_by="Matthew",
+    ) == "private@example.com"
+    with pytest.raises(ValueError, match="forbids"):
+        storage.read_sensitive_value(
+            never_reuse["secret_id"],
+            purpose=SensitiveReadPurpose.APPLICATION_REUSE,
+            reuse_approved_by="Matthew",
+        )
+    assert storage.read_sensitive_value(
+        never_reuse["secret_id"],
+        purpose=SensitiveReadPurpose.OWNER_REVIEW,
+    ) == "private response"
+
+
 def test_backup_contains_only_ciphertext_and_delete_can_purge_snapshots(
     tmp_path: Path,
 ) -> None:
@@ -280,6 +357,29 @@ def test_delete_without_purge_reports_backup_recommendation(tmp_path: Path) -> N
     assert result["backup_purge_recommended"] is True
 
 
+def test_failed_backup_purge_leaves_active_sensitive_record(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    storage = make_storage(tmp_path)
+    saved = save_contact(storage)
+
+    def fail_purge() -> int:
+        raise OSError("purge failed")
+
+    monkeypatch.setattr(storage, "_purge_database_backups", fail_purge)
+    with pytest.raises(OSError, match="purge failed"):
+        storage.delete_sensitive_value(
+            saved["secret_id"],
+            purge_backups=True,
+        )
+
+    assert storage.read_sensitive_value(
+        saved["secret_id"],
+        purpose=SensitiveReadPurpose.OWNER_REVIEW,
+    ) == "private@example.com"
+
+
 def test_backup_purge_requires_confirmation_and_rejects_symlinks(
     tmp_path: Path,
 ) -> None:
@@ -295,6 +395,19 @@ def test_backup_purge_requires_confirmation_and_rejects_symlinks(
     with pytest.raises(ValueError, match="regular file"):
         storage.purge_database_backups(confirm=True)
     assert outside.read_text(encoding="utf-8") == "outside"
+
+
+def test_backup_purge_preserves_unmanaged_lookalike_files(tmp_path: Path) -> None:
+    storage = make_storage(tmp_path)
+    save_contact(storage)
+    storage.create_backup(now=datetime(2026, 8, 13, tzinfo=UTC))
+    unrelated = tmp_path / "backups" / "jobs-personal-not-a-backup.json"
+    unrelated.write_text("private but unrelated", encoding="utf-8")
+
+    removed = storage.purge_database_backups(confirm=True)
+
+    assert removed == 1
+    assert unrelated.read_text(encoding="utf-8") == "private but unrelated"
 
 
 def save_application(storage: JobStorage) -> dict:
@@ -342,6 +455,17 @@ def test_sensitive_audit_event_contains_metadata_but_no_raw_value(
     assert event["value_redacted"] == REDACTED_VALUE
     assert "private response" not in database_text
 
+    with pytest.raises(TypeError, match="current_step"):
+        storage.add_sensitive_application_event(
+            application["id"],
+            question="Sensitive question",
+            category=SensitiveCategory.OTHER,
+            current_step="private response",
+        )
+    assert "private response" not in (
+        tmp_path / "jobs.json"
+    ).read_text(encoding="utf-8")
+
 
 def test_deleting_application_removes_redacted_audit_and_scoped_secrets(
     tmp_path: Path,
@@ -364,7 +488,24 @@ def test_deleting_application_removes_redacted_audit_and_scoped_secrets(
     assert result["sensitive_values_deleted"] == 1
     assert storage.get_application(application["id"]) is None
     with pytest.raises(ValueError, match="does not exist"):
-        storage.read_sensitive_value(saved["secret_id"])
+        storage.read_sensitive_value(
+            saved["secret_id"],
+            purpose=SensitiveReadPurpose.OWNER_REVIEW,
+        )
+
+    with pytest.raises(ValueError, match="existing application"):
+        storage.save_sensitive_value(
+            scope="application",
+            scope_id=str(application["id"]),
+            field_name="work_authorization",
+            value="orphaned response",
+            category=SensitiveCategory.WORK_AUTHORIZATION,
+            reuse_policy=SensitiveReusePolicy.CONFIRM_FIRST,
+            approved_by="Matthew",
+        )
+    assert "orphaned response" not in (
+        tmp_path / "jobs.json"
+    ).read_text(encoding="utf-8")
 
 
 def test_recovery_drill_decrypts_snapshot_without_printing_values(
@@ -440,3 +581,25 @@ def test_schema_validation_rejects_plaintext_or_unknown_sensitive_fields(
     with pytest.raises(ValueError, match="Sensitive-value table is invalid") as error:
         JobStorage(tmp_path / "jobs.json")
     assert "private@example.com" not in str(error.value)
+
+
+def test_invalid_pre_v7_sensitive_table_is_rejected_before_backup(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "jobs.json"
+    database = TinyDB(database_path)
+    database.table("schema_metadata").insert(
+        {"key": "schema_version", "version": 6}
+    )
+    database.table("sensitive_values").insert(
+        {
+            "scope": "application_profile",
+            "plaintext": "private@example.com",
+        }
+    )
+    database.close()
+
+    with pytest.raises(ValueError, match="Sensitive-value table is invalid"):
+        JobStorage(database_path)
+
+    assert not (tmp_path / "backups").exists()

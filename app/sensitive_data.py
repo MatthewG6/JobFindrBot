@@ -55,6 +55,11 @@ class SensitiveReusePolicy(str, Enum):
     NEVER_REUSE = "never_reuse"
 
 
+class SensitiveReadPurpose(str, Enum):
+    OWNER_REVIEW = "owner_review"
+    APPLICATION_REUSE = "application_reuse"
+
+
 NO_RETENTION_BY_DEFAULT = frozenset(
     {
         SensitiveCategory.DEMOGRAPHIC,
@@ -149,8 +154,8 @@ class SensitiveValueCipher:
             raise SensitiveDataError("Sensitive-data key does not match record")
         try:
             plaintext = AESGCM(self._key).decrypt(
-                base64.urlsafe_b64decode(parsed.nonce),
-                base64.urlsafe_b64decode(parsed.ciphertext),
+                _strict_urlsafe_b64decode(parsed.nonce),
+                _strict_urlsafe_b64decode(parsed.ciphertext),
                 context,
             )
             return plaintext.decode("utf-8")
@@ -231,9 +236,25 @@ class MacOSKeychainStore:
         )
         return cipher.key_id
 
-    def restore_recovery(self, path: Path) -> str:
+    def restore_recovery(
+        self,
+        path: Path,
+        *,
+        replace_existing: bool = False,
+    ) -> str:
         key = self.load_recovery_key(path)
         cipher = SensitiveValueCipher(key)
+        try:
+            existing_key = self.load_key()
+        except SensitiveDataKeyUnavailable:
+            self._store_key(key, update=False)
+            return cipher.key_id
+        if secrets.compare_digest(existing_key, key):
+            return cipher.key_id
+        if not replace_existing:
+            raise SensitiveDataError(
+                "Recovery key differs from the existing Jobbot Keychain key"
+            )
         self._store_key(key, update=True)
         return cipher.key_id
 
@@ -297,7 +318,7 @@ class MacOSKeychainStore:
         if not isinstance(encoded, str):
             raise SensitiveDataError("Sensitive-data key is invalid")
         try:
-            key = base64.urlsafe_b64decode(encoded.encode("ascii"))
+            key = _strict_urlsafe_b64decode(encoded)
         except (ValueError, UnicodeEncodeError) as error:
             raise SensitiveDataError("Sensitive-data key is invalid") from error
         if len(key) != 32:
@@ -346,6 +367,14 @@ def redact_sensitive_mapping(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(redact_sensitive_mapping(item) for item in value)
     return value
+
+
+def _strict_urlsafe_b64decode(value: str) -> bytes:
+    return base64.b64decode(
+        value.encode("ascii"),
+        altchars=b"-_",
+        validate=True,
+    )
 
 
 def _write_owner_only_file(path: Path, content: bytes) -> None:

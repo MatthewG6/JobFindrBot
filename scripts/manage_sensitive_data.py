@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 
 BACKUP_PURGE_CONFIRMATION = "DELETE-JOBBOT-BACKUPS"
+KEY_REPLACE_CONFIRMATION = "REPLACE-JOBBOT-KEY"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,7 +39,9 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("path", type=Path)
 
     restore = subparsers.add_parser("restore-recovery")
-    restore.add_argument("path", type=Path)
+    restore.add_argument("recovery_path", type=Path)
+    restore.add_argument("database_path", type=Path)
+    restore.add_argument("--confirm", required=True)
 
     verify = subparsers.add_parser("verify-recovery")
     verify.add_argument("recovery_path", type=Path)
@@ -97,7 +100,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Owner-only recovery package created: key_id={key_id}")
             return 0
         if args.command == "restore-recovery":
-            key_id = key_store.restore_recovery(args.path)
+            if args.confirm != KEY_REPLACE_CONFIRMATION:
+                raise SensitiveDataError(
+                    "Key replacement requires "
+                    f"--confirm {KEY_REPLACE_CONFIRMATION}"
+                )
+            verify_recovery(args.recovery_path, args.database_path)
+            key_id = key_store.restore_recovery(
+                args.recovery_path,
+                replace_existing=True,
+            )
             print(f"Sensitive-data key restored: key_id={key_id}")
             return 0
         if args.command == "verify-recovery":
