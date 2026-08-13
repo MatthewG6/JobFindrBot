@@ -221,7 +221,6 @@ def get_scoring_benchmark(
     try:
         return session_benchmark(
             label_store,
-            CANDIDATE_PROFILE,
             split=split,
         )
     except (LabelingSessionIncomplete, LabelingSessionNotFound) as error:

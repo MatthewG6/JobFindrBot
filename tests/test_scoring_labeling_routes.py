@@ -150,6 +150,13 @@ def test_labeling_page_is_served_only_for_local_clients(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "Jobbot Scoring Review" in response.text
+    assert "Diagnostic accuracy" in response.text
+    assert "diagnostic_accuracy" in response.text
+    assert "confusion_matrix" in response.text
+    assert "validation_issues" in response.text
+    assert '<section class="empty" id="start-state" hidden>' in response.text
+    assert "startState.hidden = true" in response.text
+    assert "startState.hidden = false" in response.text
     assert response.headers["cache-control"] == "no-store"
     assert "frame-ancestors 'none'" in response.headers[
         "content-security-policy"

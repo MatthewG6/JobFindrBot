@@ -19,7 +19,7 @@ from app.scoring_benchmark import (
     FitLabel,
     ScoringLabel,
     classify_score,
-    evaluate_scoring,
+    evaluate_frozen_predictions,
     posting_fingerprint,
 )
 
@@ -502,7 +502,6 @@ def record_scoring_label(
 
 def session_benchmark(
     store: ScoringLabelStore,
-    profile: CandidateProfile,
     *,
     split: BenchmarkSplit,
 ) -> dict:
@@ -516,11 +515,10 @@ def session_benchmark(
     with store.locked():
         session = store.load_session()
         labels = _validate_session_labels(session, store.load_labels())
-    jobs = [
-        {"id": entry.job_id, **entry.posting.model_dump(mode="json")}
-        for entry in session.entries
-    ]
-    return evaluate_scoring(jobs, labels, profile, split=split)
+    predictions = {
+        entry.job_id: entry.predicted_label for entry in session.entries
+    }
+    return evaluate_frozen_predictions(labels, predictions, split=split)
 
 
 def label_comparison(

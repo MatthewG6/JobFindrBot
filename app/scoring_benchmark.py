@@ -60,65 +60,30 @@ def safe_ratio(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 4)
 
 
-def posting_fingerprint(posting: JobPosting) -> str:
-    """Bind a label to the complete immutable posting presented for review."""
-    payload = posting.model_dump(
-        mode="json",
-        exclude={"created_at", "discovered_at"},
-    )
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def evaluate_scoring(
-    jobs: list[dict],
-    labels: list[ScoringLabel],
-    profile: CandidateProfile,
-    split: BenchmarkSplit = "validation",
+def summarize_predictions(
+    *,
+    split: BenchmarkSplit,
+    selected_count: int,
+    actual_predictions: list[tuple[FitLabel, FitLabel]],
+    missing: int = 0,
+    invalid: int = 0,
+    identity_mismatches: int = 0,
 ) -> dict:
-    jobs_by_id = {job.get("id"): job for job in jobs}
-    selected = [label for label in labels if label.split == split]
     confusion = {
         actual: {predicted: 0 for predicted in LABELS}
         for actual in LABELS
     }
-    missing = 0
-    invalid = 0
-    identity_mismatches = 0
     correct = 0
-    evaluated = 0
     predicted_reviewable = 0
     correct_reviewable = 0
 
-    for label in selected:
-        job = jobs_by_id.get(label.job_id)
-        if job is None:
-            missing += 1
-            continue
-        try:
-            posting = JobPosting.model_validate(job)
-        except ValueError:
-            invalid += 1
-            continue
-        if (
-            posting_fingerprint(posting) != label.posting_fingerprint
-            or str(posting.url) != str(label.job_url)
-        ):
-            identity_mismatches += 1
-            continue
-        predicted = classify_score(score_job(posting, profile).score, profile)
-        confusion[label.label][predicted] += 1
-        evaluated += 1
-        if predicted == label.label:
+    for actual, predicted in actual_predictions:
+        confusion[actual][predicted] += 1
+        if predicted == actual:
             correct += 1
         if predicted in {"review", "strong"}:
             predicted_reviewable += 1
-            if label.label in {"review", "strong"}:
+            if actual in {"review", "strong"}:
                 correct_reviewable += 1
 
     recalls = []
@@ -134,7 +99,7 @@ def evaluate_scoring(
     validation_issues = []
     if split != "validation":
         validation_issues.append("Only the validation split supports accuracy claims")
-    if len(selected) < MINIMUM_VALIDATION_LABELS:
+    if selected_count < MINIMUM_VALIDATION_LABELS:
         validation_issues.append(
             f"At least {MINIMUM_VALIDATION_LABELS} validation labels are required"
         )
@@ -154,6 +119,7 @@ def evaluate_scoring(
             f"{MINIMUM_REVIEWABLE_PREDICTIONS} reviewable predictions are required"
         )
     valid_for_accuracy_claim = not validation_issues
+    evaluated = len(actual_predictions)
     diagnostic_accuracy = safe_ratio(correct, evaluated)
     diagnostic_balanced_accuracy = (
         round(sum(recalls) / len(recalls), 4) if recalls else None
@@ -161,7 +127,7 @@ def evaluate_scoring(
 
     return {
         "split": split,
-        "labels_selected": len(selected),
+        "labels_selected": selected_count,
         "jobs_evaluated": evaluated,
         "jobs_missing": missing,
         "jobs_invalid": invalid,
@@ -187,3 +153,79 @@ def evaluate_scoring(
         "class_counts": class_counts,
         "confusion_matrix": confusion,
     }
+
+
+def evaluate_frozen_predictions(
+    labels: list[ScoringLabel],
+    predictions: dict[int, FitLabel],
+    split: BenchmarkSplit = "validation",
+) -> dict:
+    selected = [label for label in labels if label.split == split]
+    actual_predictions = [
+        (label.label, predictions[label.job_id])
+        for label in selected
+        if label.job_id in predictions
+    ]
+    return summarize_predictions(
+        split=split,
+        selected_count=len(selected),
+        actual_predictions=actual_predictions,
+        missing=len(selected) - len(actual_predictions),
+    )
+
+
+def posting_fingerprint(posting: JobPosting) -> str:
+    """Bind a label to the complete immutable posting presented for review."""
+    payload = posting.model_dump(
+        mode="json",
+        exclude={"created_at", "discovered_at"},
+    )
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def evaluate_scoring(
+    jobs: list[dict],
+    labels: list[ScoringLabel],
+    profile: CandidateProfile,
+    split: BenchmarkSplit = "validation",
+) -> dict:
+    jobs_by_id = {job.get("id"): job for job in jobs}
+    selected = [label for label in labels if label.split == split]
+    missing = 0
+    invalid = 0
+    identity_mismatches = 0
+    actual_predictions: list[tuple[FitLabel, FitLabel]] = []
+
+    for label in selected:
+        job = jobs_by_id.get(label.job_id)
+        if job is None:
+            missing += 1
+            continue
+        try:
+            posting = JobPosting.model_validate(job)
+        except ValueError:
+            invalid += 1
+            continue
+        if (
+            posting_fingerprint(posting) != label.posting_fingerprint
+            or str(posting.url) != str(label.job_url)
+        ):
+            identity_mismatches += 1
+            continue
+        predicted = classify_score(score_job(posting, profile).score, profile)
+        actual_predictions.append((label.label, predicted))
+
+    return summarize_predictions(
+        split=split,
+        selected_count=len(selected),
+        actual_predictions=actual_predictions,
+        missing=missing,
+        invalid=invalid,
+        identity_mismatches=identity_mismatches,
+    )

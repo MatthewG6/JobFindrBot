@@ -135,6 +135,21 @@
     .metric + .metric { border-left: 1px solid var(--border); }
     .metric span { display: block; color: var(--muted); font-size: 12px; }
     .metric strong { display: block; margin-top: 5px; font-size: 24px; }
+    .benchmark-status { margin: 8px 0 0; color: var(--muted); line-height: 1.5; }
+    .benchmark-status strong { color: var(--text); }
+    .summary-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, .8fr); gap: 28px; margin-top: 28px; }
+    .summary-panel h3 { margin: 0 0 12px; font-size: 15px; }
+    .class-counts { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); }
+    .class-count { padding: 14px 12px; }
+    .class-count + .class-count { border-left: 1px solid var(--border); }
+    .class-count span { display: block; color: var(--muted); font-size: 12px; text-transform: capitalize; }
+    .class-count strong { display: block; margin-top: 4px; font-size: 20px; }
+    .issues { margin: 12px 0 0; padding-left: 20px; color: var(--muted); line-height: 1.5; }
+    .confusion { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .confusion caption { margin-bottom: 9px; color: var(--muted); text-align: left; }
+    .confusion th, .confusion td { border: 1px solid var(--border); padding: 9px; text-align: center; }
+    .confusion thead th { color: var(--muted); font-weight: 650; }
+    .confusion tbody th { text-align: left; text-transform: capitalize; }
 
     [hidden] { display: none !important; }
 
@@ -149,6 +164,7 @@
       .posting h2 { font-size: 21px; }
       .metrics { grid-template-columns: 1fr; }
       .metric + .metric { border-left: 0; border-top: 1px solid var(--border); }
+      .summary-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -163,7 +179,7 @@
     </header>
     <div class="progress-track" aria-hidden="true"><div class="progress-bar" id="progress-bar"></div></div>
 
-    <section class="empty" id="start-state">
+    <section class="empty" id="start-state" hidden>
       <div>
         <h2>Real-job review set</h2>
         <p>25 calibration posts, then 50 held-out posts.</p>
@@ -208,10 +224,30 @@
     <section class="summary" id="summary-state" hidden>
       <div class="eyebrow">Review complete</div>
       <h2>Held-out benchmark</h2>
+      <p class="benchmark-status" id="benchmark-status"></p>
       <div class="metrics">
-        <div class="metric"><span>Accuracy</span><strong id="accuracy"></strong></div>
-        <div class="metric"><span>Balanced accuracy</span><strong id="balanced-accuracy"></strong></div>
-        <div class="metric"><span>Review-inbox precision</span><strong id="reviewable-precision"></strong></div>
+        <div class="metric"><span id="accuracy-label">Diagnostic accuracy</span><strong id="accuracy"></strong></div>
+        <div class="metric"><span id="balanced-accuracy-label">Diagnostic balanced accuracy</span><strong id="balanced-accuracy"></strong></div>
+        <div class="metric"><span id="reviewable-precision-label">Diagnostic review-inbox precision</span><strong id="reviewable-precision"></strong></div>
+      </div>
+      <div class="summary-grid">
+        <section class="summary-panel">
+          <h3>Your held-out decisions</h3>
+          <div class="class-counts">
+            <div class="class-count"><span>Reject</span><strong id="reject-count"></strong></div>
+            <div class="class-count"><span>Review</span><strong id="review-count"></strong></div>
+            <div class="class-count"><span>Strong</span><strong id="strong-count"></strong></div>
+          </div>
+          <ul class="issues" id="validation-issues"></ul>
+        </section>
+        <section class="summary-panel">
+          <h3>Prediction breakdown</h3>
+          <table class="confusion">
+            <caption>Rows are your labels; columns are Jobbot predictions.</caption>
+            <thead><tr><th scope="col">Your label</th><th scope="col">Reject</th><th scope="col">Review</th><th scope="col">Strong</th></tr></thead>
+            <tbody id="confusion-body"></tbody>
+          </table>
+        </section>
       </div>
     </section>
   </main>
@@ -270,13 +306,58 @@
       ]);
       updateProgress(progress);
       if (item) return showJob(item);
+      startState.hidden = true;
       reviewState.hidden = true;
       summaryState.hidden = false;
       const benchmark = await api("/scoring/benchmark?split=validation");
-      const percent = value => value === null ? "Unavailable" : `${Math.round(value * 100)}%`;
-      document.getElementById("accuracy").textContent = percent(benchmark.accuracy);
-      document.getElementById("balanced-accuracy").textContent = percent(benchmark.balanced_accuracy);
-      document.getElementById("reviewable-precision").textContent = percent(benchmark.reviewable_precision);
+      showBenchmark(benchmark);
+    }
+
+    function showBenchmark(benchmark) {
+      const diagnostic = !benchmark.valid_for_accuracy_claim;
+      const percent = value => value === null ? "Unavailable" : `${Math.round(value * 1000) / 10}%`;
+      const accuracy = diagnostic ? benchmark.diagnostic_accuracy : benchmark.accuracy;
+      const balanced = diagnostic ? benchmark.diagnostic_balanced_accuracy : benchmark.balanced_accuracy;
+      const precision = diagnostic ? benchmark.diagnostic_reviewable_precision : benchmark.reviewable_precision;
+      const prefix = diagnostic ? "Diagnostic " : "";
+
+      document.getElementById("accuracy-label").textContent = `${prefix}accuracy`;
+      document.getElementById("balanced-accuracy-label").textContent = `${prefix}balanced accuracy`;
+      document.getElementById("reviewable-precision-label").textContent = `${prefix}review-inbox precision`;
+      document.getElementById("accuracy").textContent = percent(accuracy);
+      document.getElementById("balanced-accuracy").textContent = percent(balanced);
+      document.getElementById("reviewable-precision").textContent = percent(precision);
+
+      const status = document.getElementById("benchmark-status");
+      status.textContent = diagnostic
+        ? `Baseline diagnostics from ${benchmark.jobs_evaluated} held-out jobs. This is not yet valid for an accuracy claim.`
+        : `Claim-valid results from ${benchmark.jobs_evaluated} held-out jobs.`;
+
+      for (const label of ["reject", "review", "strong"]) {
+        document.getElementById(`${label}-count`).textContent = benchmark.class_counts[label];
+      }
+      const issues = document.getElementById("validation-issues");
+      issues.replaceChildren(...benchmark.validation_issues.map(message => {
+        const item = document.createElement("li");
+        item.textContent = message;
+        return item;
+      }));
+      issues.hidden = benchmark.validation_issues.length === 0;
+
+      const body = document.getElementById("confusion-body");
+      body.replaceChildren(...["reject", "review", "strong"].map(actual => {
+        const row = document.createElement("tr");
+        const heading = document.createElement("th");
+        heading.scope = "row";
+        heading.textContent = actual;
+        row.append(heading);
+        for (const predicted of ["reject", "review", "strong"]) {
+          const value = document.createElement("td");
+          value.textContent = benchmark.confusion_matrix[actual][predicted];
+          row.append(value);
+        }
+        return row;
+      }));
     }
 
     function showComparison(comparison) {
@@ -342,6 +423,7 @@
     api("/scoring/labels/session")
       .then(loadNext)
       .catch(error => {
+        startState.hidden = false;
         if (!error.message.includes("does not exist")) document.getElementById("start-error").textContent = error.message;
       });
   </script>

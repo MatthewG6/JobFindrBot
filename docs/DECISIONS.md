@@ -261,3 +261,18 @@ remains in this file and links to the decision that replaced it.
   favors materially complete posting data while still representing every
   decision class; it does not estimate the natural prevalence of each class in
   the complete job corpus.
+
+## D020 - Preserve and disclose incomplete benchmark evidence
+
+- Status: accepted on 2026-08-12
+- Decision: A completed review displays diagnostic metrics, human class counts,
+  the confusion matrix, and every failed claim-validity condition. Official
+  accuracy fields remain unavailable until all benchmark gates pass; diagnostic
+  values are explicitly labeled and are not presented as a claim.
+- Decision: Session benchmarks evaluate the predictions frozen into the
+  integrity-bound queue. Updating the candidate profile after completion cannot
+  rewrite the recorded baseline. Profile changes informed by completed labels
+  require a new held-out review session before they support a new accuracy claim.
+- Consequence: The first 50-job validation split remains useful as transparent
+  baseline evidence even when a human class is underrepresented, while future
+  tuning and evaluation remain separated.
