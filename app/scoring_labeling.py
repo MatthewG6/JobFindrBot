@@ -289,6 +289,9 @@ def _stable_job_order(job: dict) -> str:
 
 def session_fingerprint(entries: list[QueueEntry]) -> str:
     payload = [entry.model_dump(mode="json") for entry in entries]
+    for entry in payload:
+        if entry["posting"].get("workplace_type") is None:
+            entry["posting"].pop("workplace_type", None)
     encoded = json.dumps(
         payload,
         sort_keys=True,

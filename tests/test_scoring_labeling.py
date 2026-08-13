@@ -205,6 +205,36 @@ def test_live_posting_drift_does_not_change_fixed_snapshot(tmp_path: Path) -> No
     assert decision.posting_fingerprint == target.posting_fingerprint
 
 
+def test_legacy_queue_without_optional_workplace_type_remains_valid(
+    tmp_path: Path,
+) -> None:
+    store = ScoringLabelStore(
+        queue_path=tmp_path / "queue.json",
+        labels_path=tmp_path / "labels.json",
+    )
+    create_labeling_session(make_session_jobs(), store, PROFILE)
+    content = json.loads(store.queue_path.read_text(encoding="utf-8"))
+    for entry in content["entries"]:
+        entry["posting"].pop("workplace_type", None)
+    store.queue_path.write_text(json.dumps(content), encoding="utf-8")
+
+    assert labeling_progress(store).total == SESSION_TARGET
+
+
+def test_workplace_type_value_remains_integrity_bound(tmp_path: Path) -> None:
+    store = ScoringLabelStore(
+        queue_path=tmp_path / "queue.json",
+        labels_path=tmp_path / "labels.json",
+    )
+    create_labeling_session(make_session_jobs(), store, PROFILE)
+    content = json.loads(store.queue_path.read_text(encoding="utf-8"))
+    content["entries"][0]["posting"]["workplace_type"] = "hybrid"
+    store.queue_path.write_text(json.dumps(content), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="snapshot"):
+        labeling_progress(store)
+
+
 def test_recording_rejects_out_of_order_label(tmp_path: Path) -> None:
     store = ScoringLabelStore(
         queue_path=tmp_path / "queue.json",

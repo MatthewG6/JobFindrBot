@@ -180,6 +180,8 @@ def posting_fingerprint(posting: JobPosting) -> str:
         mode="json",
         exclude={"created_at", "discovered_at"},
     )
+    if payload.get("workplace_type") is None:
+        payload.pop("workplace_type", None)
     encoded = json.dumps(
         payload,
         sort_keys=True,
