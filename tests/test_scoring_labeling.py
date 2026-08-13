@@ -339,6 +339,7 @@ def test_progress_rejects_review_url_or_stratum_tampering(tmp_path: Path) -> Non
 
 def test_validation_benchmark_remains_hidden_until_holdout_is_complete(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = ScoringLabelStore(
         queue_path=tmp_path / "queue.json",
@@ -348,7 +349,7 @@ def test_validation_benchmark_remains_hidden_until_holdout_is_complete(
     session = create_labeling_session(jobs, store, PROFILE)
 
     with pytest.raises(LabelingSessionIncomplete):
-        session_benchmark(store, PROFILE, split="validation")
+        session_benchmark(store, split="validation")
 
     for entry in session.entries:
         record_scoring_label(
@@ -357,8 +358,15 @@ def test_validation_benchmark_remains_hidden_until_holdout_is_complete(
             label=entry.predicted_label,
         )
 
-    result = session_benchmark(store, PROFILE, split="validation")
+    result = session_benchmark(store, split="validation")
 
     assert result["valid_for_accuracy_claim"] is True
     assert result["accuracy"] == 1.0
     assert labeling_progress(store).validation_labeled == VALIDATION_TARGET
+
+    def fail_if_live_scorer_runs(*args, **kwargs):
+        raise AssertionError("completed benchmark must not run the live scorer")
+
+    monkeypatch.setattr("app.scoring_labeling.score_job", fail_if_live_scorer_runs)
+    frozen_result = session_benchmark(store, split="validation")
+    assert frozen_result == result

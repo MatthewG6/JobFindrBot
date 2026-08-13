@@ -481,7 +481,11 @@ Evaluate the completed labels from the terminal with:
 ```
 
 Jobbot will not claim a scoring accuracy rate until enough real validation labels
-exist and the benchmark demonstrates it.
+exist and the benchmark demonstrates it. A completed review always displays
+diagnostic metrics, label counts, the confusion matrix, and any condition that
+prevents an official claim. Session benchmarks use the predictions frozen into
+the integrity-bound queue, so later profile tuning cannot rewrite a completed
+baseline.
 
 Scoring V2 is deterministic and bounded from 0 to 100. It combines five weighted
 dimensions: role 30%, seniority 15%, skills 30%, location 15%, and risk 10%.
