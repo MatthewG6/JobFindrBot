@@ -371,7 +371,11 @@ def test_redaction_recurses_without_mutating_safe_metadata() -> None:
     original = {
         "question": "What is your email?",
         "answer": "private@example.com",
-        "nested": {"token": "abc", "status": "pending"},
+        "nested": {
+            "access_token": "abc",
+            "client_secret": "def",
+            "status": "pending",
+        },
     }
 
     redacted = redact_sensitive_mapping(original)
@@ -379,7 +383,11 @@ def test_redaction_recurses_without_mutating_safe_metadata() -> None:
     assert redacted == {
         "question": "What is your email?",
         "answer": REDACTED_VALUE,
-        "nested": {"token": REDACTED_VALUE, "status": "pending"},
+        "nested": {
+            "access_token": REDACTED_VALUE,
+            "client_secret": REDACTED_VALUE,
+            "status": "pending",
+        },
     }
     assert original["answer"] == "private@example.com"
 
@@ -408,5 +416,6 @@ def test_schema_validation_rejects_plaintext_or_unknown_sensitive_fields(
     record["plaintext"] = "private@example.com"
     (tmp_path / "jobs.json").write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Sensitive-value table is invalid") as error:
         JobStorage(tmp_path / "jobs.json")
+    assert "private@example.com" not in str(error.value)

@@ -300,23 +300,29 @@ class MacOSKeychainStore:
 
 def redact_sensitive_mapping(value: Any) -> Any:
     """Recursively redact common secret-bearing keys before logging."""
-    sensitive_keys = {
+    exact_sensitive_keys = {
         "answer",
+        "sensitive_value",
+        "value",
+    }
+    sensitive_key_fragments = {
         "authorization",
         "cookie",
         "credential",
         "password",
         "secret",
-        "sensitive_value",
         "signature",
         "token",
-        "value",
     }
     if isinstance(value, dict):
         return {
             key: (
                 REDACTED_VALUE
-                if str(key).lower() in sensitive_keys
+                if str(key).lower() in exact_sensitive_keys
+                or any(
+                    fragment in str(key).lower()
+                    for fragment in sensitive_key_fragments
+                )
                 else redact_sensitive_mapping(item)
             )
             for key, item in value.items()

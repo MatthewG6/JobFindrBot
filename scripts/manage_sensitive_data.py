@@ -20,6 +20,7 @@ from app.sensitive_data import (
     encryption_context,
 )
 from app.storage import DEFAULT_DB_PATH, JobStorage
+from pydantic import ValidationError
 
 
 BACKUP_PURGE_CONFIRMATION = "DELETE-JOBBOT-BACKUPS"
@@ -67,7 +68,12 @@ def verify_recovery(recovery_path: Path, database_path: Path) -> tuple[str, int]
     cipher = SensitiveValueCipher(key_store.load_recovery_key(recovery_path))
     records = _sensitive_records(database_path)
     for raw_record in records:
-        record = SensitiveValueRecord.model_validate(raw_record)
+        try:
+            record = SensitiveValueRecord.model_validate(raw_record)
+        except ValidationError:
+            raise SensitiveDataError(
+                "Sensitive-value table is invalid"
+            ) from None
         context = encryption_context(
             secret_id=record.secret_id,
             scope=record.scope,

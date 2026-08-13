@@ -14,6 +14,7 @@ from uuid import uuid4
 from weakref import WeakSet
 
 from tinydb import Query, TinyDB
+from pydantic import ValidationError
 
 from app.candidate_profile import CandidateProfile, default_candidate_profile
 from app.dedupe import job_content_hash
@@ -324,8 +325,11 @@ class JobStorage:
             or version != CURRENT_SCHEMA_VERSION
         ):
             raise ValueError("Database schema version is unsupported")
-        for record in self.sensitive_values_table.all():
-            SensitiveValueRecord.model_validate(dict(record))
+        try:
+            for record in self.sensitive_values_table.all():
+                SensitiveValueRecord.model_validate(dict(record))
+        except ValidationError:
+            raise ValueError("Sensitive-value table is invalid") from None
 
     def _apply_migration(self, version: int) -> None:
         if version == 1:
