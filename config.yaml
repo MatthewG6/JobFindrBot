@@ -3,6 +3,7 @@ project:
   mode: local_personal_use
 
 candidate_profile: credentials/candidate_profile.yaml
+application_profile: credentials/application_profile.yaml
 
 safety:
   auto_apply: false

@@ -5,14 +5,15 @@ resolves them to official employer postings where possible, produces evidence-
 based fit scores, supports human review, and assists with applications without
 submitting anything without explicit approval.
 
-Current checklist completion after the sensitive-data foundation:
-**25 of 44 items (57%)**.
+Current checklist completion after the application-profile foundation:
+**27 of 44 items (61%)**.
 
 ## Definition of Done
 
 ### Discovery and operations
 
-- [x] Gmail ingestion for labeled LinkedIn and Indeed alerts
+- [x] Gmail ingestion for labeled LinkedIn and Indeed alerts (capability retained;
+  provider subscriptions operator-paused under D022)
 - [x] Compliant public and employer-board source adapters
 - [x] Thirty-minute launchd schedule with provider-specific intervals
 - [x] Deduplication, source attribution, and persistent local storage
@@ -44,8 +45,8 @@ Current checklist completion after the sensitive-data foundation:
 
 - [x] Application state machine with separate start and submit approvals
 - [x] Implement the sensitive-data encryption, retention, deletion, and redaction policy
-- [ ] Add a validated private application profile separate from scoring preferences
-- [ ] Catalog resume variants and other approved application documents
+- [x] Add a validated private application profile separate from scoring preferences
+- [x] Catalog resume variants and other approved application documents
 - [ ] Store structured answers with sensitivity, context, provenance, and revisions
 - [ ] Support automatic, confirm-first, and never-reuse answer policies
 - [ ] Match questions by meaning and context with explicit confidence
@@ -75,7 +76,7 @@ Current checklist completion after the sensitive-data foundation:
 2. [x] Add the focused local review and labeling dashboard
 3. [x] Implement D015, including key recovery, backup purge, and its
    sensitive-data restore drill
-4. [ ] Add the private application profile and approved document catalog
+4. [x] Add the private application profile and approved document catalog
 5. [ ] Add structured answer memory, Discord non-sensitive question approvals, and
    owner-only local sensitive input
 6. [ ] Add approved ATS form-assistance adapters and final review package
@@ -88,6 +89,10 @@ higher-concurrency operation. Current local processes use cross-process locking;
 the planned local dashboard must use the existing application/storage boundary.
 Multi-user accounts, cloud execution, and broad ATS coverage are explicitly
 outside V1.
+
+Evaluate a lower-noise replacement for the paused LinkedIn and Indeed email
+feed without scraping either provider. This is non-blocking for V1 because its
+approved public APIs and employer-board sources remain active.
 
 Material scope and sequencing decisions are recorded in the
 [decision register](DECISIONS.md).

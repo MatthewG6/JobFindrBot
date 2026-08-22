@@ -1,4 +1,5 @@
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -323,6 +324,74 @@ def test_sensitive_read_enforces_reuse_policy_and_approval(tmp_path: Path) -> No
     ) == "private response"
 
 
+def test_sensitive_value_replacement_preserves_stable_record_identity(
+    tmp_path: Path,
+) -> None:
+    storage = make_storage(tmp_path)
+    saved = save_contact(storage)
+
+    replaced = storage.replace_sensitive_value(
+        saved["secret_id"],
+        value="updated@example.com",
+        category=SensitiveCategory.CONTACT,
+        reuse_policy=SensitiveReusePolicy.CONFIRM_FIRST,
+        approved_by="Matthew",
+    )
+
+    assert replaced["secret_id"] == saved["secret_id"]
+    assert replaced["created_at"] == saved["created_at"]
+    assert replaced["updated_at"] >= saved["updated_at"]
+    assert storage.read_sensitive_value(
+        saved["secret_id"],
+        purpose=SensitiveReadPurpose.OWNER_REVIEW,
+    ) == "updated@example.com"
+    raw_database = (tmp_path / "jobs.json").read_text(encoding="utf-8")
+    assert "private@example.com" not in raw_database
+    assert "updated@example.com" not in raw_database
+
+
+def test_concurrent_profile_field_upserts_keep_one_record(tmp_path: Path) -> None:
+    database_path = tmp_path / "jobs.json"
+
+    def upsert(value: str) -> tuple[dict, bool]:
+        storage = JobStorage(
+            database_path,
+            sensitive_cipher=SensitiveValueCipher(TEST_KEY),
+        )
+        return storage.upsert_profile_sensitive_value(
+            profile_id="primary",
+            field_name="email",
+            value=value,
+            category=SensitiveCategory.CONTACT,
+            reuse_policy=SensitiveReusePolicy.CONFIRM_FIRST,
+            approved_by="Matthew",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                upsert,
+                ["first@example.com", "second@example.com"],
+            )
+        )
+
+    storage = JobStorage(
+        database_path,
+        sensitive_cipher=SensitiveValueCipher(TEST_KEY),
+    )
+    records = storage.list_sensitive_values(
+        scope="application_profile",
+        scope_id="primary",
+    )
+    value = storage.read_sensitive_value(
+        records[0]["secret_id"],
+        purpose=SensitiveReadPurpose.OWNER_REVIEW,
+    )
+    assert len(records) == 1
+    assert sorted(replaced for _, replaced in results) == [False, True]
+    assert value in {"first@example.com", "second@example.com"}
+
+
 def test_backup_contains_only_ciphertext_and_delete_can_purge_snapshots(
     tmp_path: Path,
 ) -> None:
@@ -581,6 +650,30 @@ def test_schema_validation_rejects_plaintext_or_unknown_sensitive_fields(
     with pytest.raises(ValueError, match="Sensitive-value table is invalid") as error:
         JobStorage(tmp_path / "jobs.json")
     assert "private@example.com" not in str(error.value)
+
+
+def test_schema_validation_rejects_duplicate_sensitive_secret_ids(
+    tmp_path: Path,
+) -> None:
+    storage = make_storage(tmp_path)
+    first = save_contact(storage)
+    storage.save_sensitive_value(
+        scope="answer_bank",
+        field_name="response",
+        value="private response",
+        category=SensitiveCategory.OTHER,
+        reuse_policy=SensitiveReusePolicy.CONFIRM_FIRST,
+        approved_by="Matthew",
+    )
+    storage.db.close()
+    database_path = tmp_path / "jobs.json"
+    payload = json.loads(database_path.read_text(encoding="utf-8"))
+    records = list(payload["sensitive_values"].values())
+    records[1]["secret_id"] = first["secret_id"]
+    database_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="duplicate secret IDs"):
+        JobStorage(database_path)
 
 
 def test_invalid_pre_v7_sensitive_table_is_rejected_before_backup(

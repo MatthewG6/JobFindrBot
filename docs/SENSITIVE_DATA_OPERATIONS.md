@@ -4,6 +4,9 @@ Jobbot encrypts retained application-profile and answer values with AES-256-GCM.
 The authenticated encryption context binds ciphertext to its record, scope, and
 field. The 256-bit owner key lives in macOS Keychain under service
 `com.jobfindrbot.sensitive-data`; it is not stored in TinyDB or database backups.
+The same key derives a purpose-separated HMAC key for approved-document metadata,
+so a document and its catalog hash cannot be substituted while retaining the
+recorded approval.
 
 ## Initialize the Key
 
