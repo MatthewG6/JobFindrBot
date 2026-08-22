@@ -31,9 +31,11 @@ def test_fake_scan_full_local_mvp_workflow(tmp_path: Path) -> None:
 def test_release_foundation_files_are_checked_in() -> None:
     required_paths = [
         Path(".github/workflows/ci.yml"),
+        Path("config/application_profile.example.yaml"),
         Path("config/candidate_profile.example.yaml"),
         Path("config/dynamic_render_allowlist.json"),
         Path("docs/ARCHITECTURE.md"),
+        Path("docs/APPLICATION_PROFILE_OPERATIONS.md"),
         Path("docs/SENSITIVE_DATA_OPERATIONS.md"),
         Path("docs/V1_ROADMAP.md"),
     ]

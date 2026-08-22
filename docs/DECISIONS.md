@@ -16,7 +16,7 @@ remains in this file and links to the decision that replaced it.
 
 ## D002 - LinkedIn and Indeed are discovery providers
 
-- Status: accepted
+- Status: superseded by D022 on 2026-08-21
 - Decision: Jobbot ingests authenticated, labeled LinkedIn and Indeed alert
   emails. It does not scrape or automate either provider's website.
 - Consequence: Provider emails supply discovery leads; Jobbot resolves and
@@ -66,12 +66,24 @@ remains in this file and links to the decision that replaced it.
 
 ## D008 - Structured application profile and document catalog
 
-- Status: planned
+- Status: accepted and implemented on 2026-08-21
 - Decision: Application data will live in a validated private profile, separate
   from job-search scoring preferences. Resume variants and other documents will
   be cataloged with purpose, revision, and approval metadata.
+- Decision: The private YAML profile ID scopes encrypted field records rather
+  than storing reusable values or individual secret IDs. This keeps field
+  replacement atomic within the encrypted database. Initialization generates an
+  immutable random profile ID so separate profiles cannot share field scope or
+  document approvals accidentally. Approved documents are
+  copied into the profile's owner-only directory and selected by active status,
+  explicit purpose tags, and at most one default per kind and purpose. Every
+  catalog entry binds its path, media type, revision, approver, approval time,
+  and SHA-256 fingerprint with a Keychain-backed HMAC approval signature.
 - Consequence: Browser assistance must not infer personal facts from chat history
-  or choose documents without an auditable rule.
+  or choose documents without an auditable rule. Changed, missing, symlinked, or
+  conflicting documents fail validation before application assistance. Profile
+  and document mutations use owner-only cross-process locks and atomic durable
+  replacements.
 
 ## D009 - Structured answer memory, not chat-only memory
 
@@ -310,3 +322,15 @@ remains in this file and links to the decision that replaced it.
   Strong. The allowed V1 location shapes are remote work, Rochester, and the
   state-aware Twin Cities region. Explicit out-of-region namesakes and foreign
   locations remain Review rather than becoming application candidates.
+
+## D022 - Pause LinkedIn and Indeed email discovery
+
+- Status: accepted on 2026-08-21
+- Decision: The owner unsubscribed all known LinkedIn and Indeed job-alert
+  subscriptions because their volume outweighed their discovery value. Jobbot's
+  Gmail ingestion capability and existing labeled history remain intact, but
+  provider email alerts are no longer an active discovery feed.
+- Consequence: The 30-minute scheduler continues using approved public APIs and
+  employer-board sources. A future replacement must provide lower-noise,
+  controllable discovery without scraping LinkedIn or Indeed; options include a
+  deliberately small digest, manual forwarding, or additional approved APIs.

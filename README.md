@@ -445,6 +445,38 @@ held outside the database in macOS Keychain. Recovery and deletion procedures
 are documented in
 [`docs/SENSITIVE_DATA_OPERATIONS.md`](docs/SENSITIVE_DATA_OPERATIONS.md).
 
+## Application Profile and Approved Documents
+
+Application-filling data is deliberately separate from candidate scoring. The
+private `credentials/application_profile.yaml` stores a profile ID and
+approved-document metadata; that ID scopes reusable values encrypted in TinyDB
+using the owner key in macOS Keychain. Raw values are entered through a
+non-echoing local prompt and never appear in the YAML file or CLI output.
+Initialization generates the profile ID; it is not reused across profiles.
+
+```bash
+.venv/bin/python scripts/manage_application_profile.py initialize
+.venv/bin/python scripts/manage_application_profile.py set-field email \
+  --category contact
+.venv/bin/python scripts/manage_application_profile.py add-document \
+  /path/to/resume.pdf \
+  --document-id software_engineering_resume \
+  --kind resume \
+  --label "Software engineering resume" \
+  --revision 2026-08-21 \
+  --approved-for software_engineering \
+  --default
+.venv/bin/python scripts/manage_application_profile.py validate --require-ready
+```
+
+Document files are copied into the owner-only profile directory and bound to
+their revision, purpose, approval metadata, and SHA-256 fingerprint by a
+Keychain-backed HMAC signature. Validation fails closed for missing or changed
+files, substituted metadata, symlinks, path traversal, undecryptable or
+mismatched encrypted fields, or conflicting defaults. See
+[`docs/APPLICATION_PROFILE_OPERATIONS.md`](docs/APPLICATION_PROFILE_OPERATIONS.md)
+for the complete owner workflow.
+
 ## Candidate Profile and Scoring Benchmark
 
 Personal role, technology, location, seniority, risk, weight, and threshold settings live
@@ -642,6 +674,7 @@ later milestone explicitly wires runtime orchestration and approval gates.
 ```text
 app/
   __init__.py
+  application_profile.py
   candidate_profile.py
   discord_bot.py
   discord_config.py
@@ -664,10 +697,12 @@ app/
   ingestion.py
   scanner.py
 config/
+  application_profile.example.yaml
   candidate_profile.example.yaml
   dynamic_render_allowlist.json
   employer_watchlist.json
 docs/
+  APPLICATION_PROFILE_OPERATIONS.md
   ARCHITECTURE.md
   DECISIONS.md
   PRODUCT_REQUIREMENTS.md
@@ -676,6 +711,7 @@ docs/
 data/
   .gitkeep
 scripts/
+  manage_application_profile.py
   run_discord_bot.py
   run_dynamic_rendering.py
   run_employer_resolution.py

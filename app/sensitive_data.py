@@ -4,6 +4,7 @@ import base64
 from datetime import datetime
 from enum import Enum
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -163,6 +164,26 @@ class SensitiveValueCipher:
             raise SensitiveDataError(
                 "Sensitive value could not be authenticated"
             ) from error
+
+    def sign_metadata(self, payload: bytes, *, purpose: str) -> str:
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", purpose):
+            raise ValueError("Metadata signature purpose is invalid")
+        signing_key = hmac.new(
+            self._key,
+            f"jobbot:{purpose}:v1".encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+        return hmac.new(signing_key, payload, hashlib.sha256).hexdigest()
+
+    def verify_metadata_signature(
+        self,
+        payload: bytes,
+        signature: str,
+        *,
+        purpose: str,
+    ) -> bool:
+        expected = self.sign_metadata(payload, purpose=purpose)
+        return hmac.compare_digest(expected, signature)
 
 
 RunCommand = Callable[..., subprocess.CompletedProcess[str]]

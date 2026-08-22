@@ -1,0 +1,14 @@
+schema_version: 1
+profile_id: primary
+profile_name: Primary
+approval_name: Owner
+
+# Reusable field values never belong in this file. The profile ID scopes those
+# encrypted records in TinyDB so field replacement stays a single-store update.
+
+# The owner CLI copies approved files into credentials/documents, records their
+# SHA-256 fingerprint, and adds revision and approval metadata here.
+documents: []
+
+created_at: 2026-08-21T00:00:00Z
+updated_at: 2026-08-21T00:00:00Z

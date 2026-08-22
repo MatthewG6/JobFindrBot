@@ -121,14 +121,29 @@ validation metrics unlock only when all 50 held-out decisions exist.
 
 ## Application Memory
 
-Application memory is planned but not yet operational. It will be separate from
-job-scoring preferences and will contain a validated personal application
-profile, approved document catalog, and structured answer library. Answers retain
-their original wording, normalized intent, sensitivity, context, approval,
-reuse policy, and revision history. Unknown or sensitive questions pause the
-workflow. Discord carries review state, but raw sensitive values are entered
-only through an owner-only local surface; chat history alone is never treated as
-an approved answer source.
+The application profile and approved-document catalog are operational and
+separate from job-scoring preferences. Reusable profile values remain encrypted
+in schema-v7 sensitive records; the owner-only YAML profile ID scopes those
+records without duplicating secret IDs across files. Its document catalog binds
+each private file to a purpose,
+revision, approval, active/default state, media type, and SHA-256 fingerprint.
+Initialization generates a random immutable profile ID. Profile and document
+writes use owner-only cross-process locks, atomic replacement, directory fsync,
+and a recoverable document-add transaction marker; encrypted profile fields use
+a transactional scoped upsert.
+The owner key signs that metadata so changing both a document and its adjacent
+hash cannot preserve approval. The loader rejects plaintext profile fields,
+missing, undecryptable, or mismatched encrypted references, symlinks, path
+traversal, changed files, unauthentic metadata, and conflicting defaults.
+Verified document bytes are read from the same no-follow file descriptor used
+for hashing so later form adapters do not consume an unverified pathname.
+
+The structured answer library remains the next application-memory milestone.
+Answers will retain their original wording, normalized intent, sensitivity,
+context, approval, reuse policy, and revision history. Unknown or sensitive
+questions pause the workflow. Discord carries review state, but raw sensitive
+values are entered only through an owner-only local surface; chat history alone
+is never treated as an approved answer source.
 
 ## Trust Boundaries
 

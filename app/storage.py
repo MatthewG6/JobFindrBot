@@ -331,10 +331,24 @@ class JobStorage:
 
     def _validate_sensitive_records(self) -> None:
         try:
-            for record in self.sensitive_values_table.all():
+            records = [
                 SensitiveValueRecord.model_validate(dict(record))
+                for record in self.sensitive_values_table.all()
+            ]
         except ValidationError:
             raise ValueError("Sensitive-value table is invalid") from None
+        secret_ids = [record.secret_id for record in records]
+        if len(secret_ids) != len(set(secret_ids)):
+            raise ValueError("Sensitive-value table has duplicate secret IDs")
+        profile_fields = [
+            (record.scope_id, record.field_name)
+            for record in records
+            if record.scope == "application_profile"
+        ]
+        if len(profile_fields) != len(set(profile_fields)):
+            raise ValueError(
+                "Sensitive-value table has duplicate application profile fields"
+            )
 
     def _apply_migration(self, version: int) -> None:
         if version == 1:
@@ -652,7 +666,10 @@ class JobStorage:
             except OSError:
                 pass
         finally:
-            os.close(descriptor)
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
     def save_sensitive_value(
         self,
@@ -713,6 +730,17 @@ class JobStorage:
                         "Application-scoped sensitive value requires an "
                         "existing application"
                     )
+            if scope == "application_profile":
+                query = Query()
+                existing = self.sensitive_values_table.search(
+                    (query.scope == scope)
+                    & (query.scope_id == scope_id)
+                    & (query.field_name == field_name)
+                )
+                if existing:
+                    raise ValueError(
+                        "Application profile encrypted field already exists"
+                    )
             self.sensitive_values_table.insert(record.model_dump(mode="json"))
         return self._sensitive_metadata(record.model_dump(mode="json"))
 
@@ -730,6 +758,137 @@ class JobStorage:
                 if (scope is None or record.get("scope") == scope)
                 and (scope_id is None or record.get("scope_id") == scope_id)
             ]
+
+    def replace_sensitive_value(
+        self,
+        secret_id: str,
+        *,
+        value: str,
+        category: SensitiveCategory | str,
+        reuse_policy: SensitiveReusePolicy | str,
+        approved_by: str,
+        retention_confirmed: bool = False,
+    ) -> dict:
+        if self._lock.transaction_owner is self:
+            return self._replace_sensitive_value(
+                secret_id,
+                value=value,
+                category=category,
+                reuse_policy=reuse_policy,
+                approved_by=approved_by,
+                retention_confirmed=retention_confirmed,
+            )
+        with self.transaction():
+            return self._replace_sensitive_value(
+                secret_id,
+                value=value,
+                category=category,
+                reuse_policy=reuse_policy,
+                approved_by=approved_by,
+                retention_confirmed=retention_confirmed,
+            )
+
+    def _replace_sensitive_value(
+        self,
+        secret_id: str,
+        *,
+        value: str,
+        category: SensitiveCategory | str,
+        reuse_policy: SensitiveReusePolicy | str,
+        approved_by: str,
+        retention_confirmed: bool = False,
+    ) -> dict:
+        cipher = self._require_sensitive_cipher()
+        parsed_category = SensitiveCategory(category)
+        parsed_policy = SensitiveReusePolicy(reuse_policy)
+        if (
+            parsed_category in NO_RETENTION_BY_DEFAULT
+            and not retention_confirmed
+        ):
+            raise ValueError(
+                f"{parsed_category.value} values require explicit retention "
+                "confirmation"
+            )
+        with self._access():
+            query = Query()
+            record = self.sensitive_values_table.get(
+                query.secret_id == secret_id
+            )
+            if record is None:
+                raise ValueError("Sensitive value does not exist")
+            parsed = SensitiveValueRecord.model_validate(dict(record))
+            context = encryption_context(
+                secret_id=parsed.secret_id,
+                scope=parsed.scope,
+                scope_id=parsed.scope_id,
+                field_name=parsed.field_name,
+            )
+            updated = SensitiveValueRecord(
+                secret_id=parsed.secret_id,
+                scope=parsed.scope,
+                scope_id=parsed.scope_id,
+                field_name=parsed.field_name,
+                category=parsed_category,
+                reuse_policy=parsed_policy,
+                retention_confirmed=retention_confirmed,
+                approved_by=approved_by,
+                encrypted_value=cipher.encrypt(value, context=context),
+                created_at=parsed.created_at,
+                updated_at=utc_now(),
+            )
+            self.sensitive_values_table.update(
+                updated.model_dump(mode="json"),
+                doc_ids=[record.doc_id],
+            )
+            return self._sensitive_metadata(updated.model_dump(mode="json"))
+
+    def upsert_profile_sensitive_value(
+        self,
+        *,
+        profile_id: str,
+        field_name: str,
+        value: str,
+        category: SensitiveCategory | str,
+        reuse_policy: SensitiveReusePolicy | str,
+        approved_by: str,
+        retention_confirmed: bool = False,
+    ) -> tuple[dict, bool]:
+        with self.transaction():
+            query = Query()
+            records = self.sensitive_values_table.search(
+                (query.scope == "application_profile")
+                & (query.scope_id == profile_id)
+                & (query.field_name == field_name)
+            )
+            if len(records) > 1:
+                raise ValueError(
+                    "Application profile contains duplicate encrypted fields"
+                )
+            if records:
+                return (
+                    self._replace_sensitive_value(
+                        records[0]["secret_id"],
+                        value=value,
+                        category=category,
+                        reuse_policy=reuse_policy,
+                        approved_by=approved_by,
+                        retention_confirmed=retention_confirmed,
+                    ),
+                    True,
+                )
+            return (
+                self.save_sensitive_value(
+                    scope="application_profile",
+                    scope_id=profile_id,
+                    field_name=field_name,
+                    value=value,
+                    category=category,
+                    reuse_policy=reuse_policy,
+                    approved_by=approved_by,
+                    retention_confirmed=retention_confirmed,
+                ),
+                False,
+            )
 
     def read_sensitive_value(
         self,
